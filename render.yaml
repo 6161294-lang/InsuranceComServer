@@ -1,0 +1,28 @@
+# Render Blueprint: the API (Docker) and one PostgreSQL database. The React client is a separate site (InsuranceComClient).
+databases:
+  - name: insurance-db
+    databaseName: insurance_claims
+    user: insurance
+    plan: free
+    ipAllowList: [] # internal connections only: the web service reaches the database over Render's private network
+
+services:
+  - type: web
+    name: insurance-claims-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ConnectionStrings__DefaultConnection
+        fromDatabase:
+          name: insurance-db
+          property: connectionString
+      - key: Jwt__Key
+        generateValue: true
+      # Origin(s) of the deployed client, comma separated, e.g. https://insurance-claims-client.onrender.com
+      - key: Cors__AllowedOrigins
+        sync: false

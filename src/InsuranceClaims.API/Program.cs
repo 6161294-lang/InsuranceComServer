@@ -60,6 +60,15 @@ try
     builder.Services.AddJwtAuthentication(builder.Configuration);
     builder.Services.AddAuthorization();
 
+    // The React client is a separate site, so its origin(s) must be allowed: comma-separated in Cors:AllowedOrigins
+    // (environment variable Cors__AllowedOrigins). Empty means no cross-origin access (the dev server proxies /api).
+    var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? string.Empty)
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(origin => origin.TrimEnd('/'))
+        .ToArray();
+    builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
+        policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()));
+
     builder.Services
         .AddControllers()
         .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()))
@@ -97,6 +106,7 @@ try
     }
 
     // ---------- Pipeline (order matters) ----------
+    app.UseCors();                                    // 0. first, so preflight requests and error responses carry CORS headers
     app.UseMiddleware<ExceptionHandlingMiddleware>(); // 1. outermost: catches everything below
     app.UseMiddleware<CorrelationIdMiddleware>();     // 2. id + logging scope for the rest of the request
     app.UseMiddleware<RequestLoggingMiddleware>();    // 3. one log line per request, with the id
@@ -104,26 +114,11 @@ try
     app.UseSwagger();
     app.UseSwaggerUI();
 
-    // The React client is built into wwwroot (see the Dockerfile) and served by the API itself.
-    var serveClient = File.Exists(Path.Combine(app.Environment.WebRootPath ?? string.Empty, "index.html"));
-    if (serveClient)
-    {
-        app.UseDefaultFiles();
-        app.UseStaticFiles();
-    }
-
     app.UseAuthentication(); // who are you - before -
     app.UseAuthorization();  // - what are you allowed to do
 
     app.MapControllers();
     app.MapHealthChecks("/health");
-
-    if (serveClient)
-    {
-        // Client-side routes (paths without a file extension) fall back to index.html, so refreshing a page works.
-        // Unknown /api, /swagger and /health paths stay 404, and real files are left to the static files middleware.
-        app.MapFallbackToFile("/{*path:regex(^(?!api/|swagger|health)[^.]*$)}", "index.html");
-    }
 
     await app.RunAsync();
 }

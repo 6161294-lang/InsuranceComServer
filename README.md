@@ -2,7 +2,7 @@
 
 שרת ASP.NET Core (.NET 10) לניהול תביעות ביטוח מול PostgreSQL. לקוחות פותחים תביעות, שמאים לוקחים אותן לטיפול, והמערכת מבטיחה שכל תביעה תגיע **לשמאי אחד בלבד**, גם כששני שמאים לוחצים "קח לטיפול" באותו רגע.
 
-הלקוח (React) נמצא בתיקייה `client` ומוגש על ידי השרת עצמו בפריסה (ראו `Dockerfile`).
+הלקוח (React) נמצא במאגר נפרד, `InsuranceComClient`, ופרוס כאתר נפרד. כדי שהדפדפן יוכל לפנות לשרת יש להגדיר את כתובת הלקוח ב-`Cors:AllowedOrigins` (משתנה סביבה `Cors__AllowedOrigins`, כמה כתובות מופרדות בפסיק).
 
 ## תיאור המערכת
 
@@ -80,10 +80,9 @@ stateDiagram-v2
 
 ## הרצה מקומית
 
-דרוש PostgreSQL. הדרך הקלה: `docker compose up -d db` משורש הפרויקט (משתמש `insurance`, סיסמה `insurance_dev_password`, בסיס `insurance_claims`).
+דרוש PostgreSQL. הדרך הקלה: `docker compose up -d db` מתיקיית המאגר (משתמש `insurance`, סיסמה `insurance_dev_password`, בסיס `insurance_claims`).
 
 ```bash
-cd server
 dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=insurance_claims;Username=insurance;Password=insurance_dev_password" --project src/InsuranceClaims.API
 dotnet user-secrets set "Jwt:Key" "<מחרוזת אקראית של לפחות 32 תווים>" --project src/InsuranceClaims.API
 dotnet run --project src/InsuranceClaims.API

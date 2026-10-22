@@ -1,7 +1,7 @@
 # Local development only. Credentials below are for a throw-away local database.
 #
-#   docker compose up --build       whole system (database + API + client) on http://localhost:8080
-#   docker compose up -d db         only PostgreSQL, for running the API and client from source
+#   docker compose up --build       database + API on http://localhost:8080 (swagger at /swagger)
+#   docker compose up -d db         only PostgreSQL, for running the API from source
 
 services:
   db:
@@ -22,14 +22,15 @@ services:
 
   app:
     build:
-      context: ..
-      dockerfile: server/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       db:
         condition: service_healthy
     environment:
       ConnectionStrings__DefaultConnection: Host=db;Port=5432;Database=insurance_claims;Username=insurance;Password=${POSTGRES_PASSWORD:-insurance_dev_password}
       Jwt__Key: ${JWT_KEY:-local-docker-compose-only-signing-key-change-me-0123456789}
+      Cors__AllowedOrigins: ${CORS_ORIGINS:-http://localhost:5173}
     ports:
       - "8080:8080"
 
