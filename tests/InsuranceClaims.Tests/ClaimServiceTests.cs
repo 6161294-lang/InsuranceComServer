@@ -11,17 +11,14 @@ namespace InsuranceClaims.Tests;
 
 public class ClaimServiceTests
 {
-    private const int CarInsuranceTypeId = 1;
-    private const int HomeInsuranceTypeId = 2;
-    private const int AdjusterId = 2;
-    private const int OtherAdjusterId = 3;
-
     private static readonly DateTimeOffset Now = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
     private static readonly Guid CurrentVersion = Guid.NewGuid();
 
     private readonly Mock<IClaimRepository> _claims = new();
-    private readonly Mock<IPolicyRepository> _policies = new();
+    private readonly Mock<IClientRepository> _clients = new();
+    private readonly Mock<IInsuranceTypeRepository> _insuranceTypes = new();
     private readonly Mock<IEmployeeRepository> _employees = new();
+    private readonly Mock<IReferralRepository> _referrals = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
     private readonly ClaimService _service;
 
@@ -29,75 +26,255 @@ public class ClaimServiceTests
     {
         _service = new ClaimService(
             _claims.Object,
-            _policies.Object,
+            _clients.Object,
+            _insuranceTypes.Object,
             _employees.Object,
+            _referrals.Object,
             _unitOfWork.Object,
             TestMapper.Create(),
             new FixedTimeProvider(Now),
             NullLogger<ClaimService>.Instance);
     }
 
-    [Fact]
-    public async Task TakeAsync_OpenClaimInSpecialization_AssignsHandlerAndSaves()
-    {
-        var claim = OpenCarClaim();
-        SetupClaim(claim);
-        SetupEmployee(Adjuster(AdjusterId, CarInsuranceTypeId));
+    // ---------- open a claim ----------
 
-        var result = await _service.TakeAsync(claim.Id, AdjusterId, new ClaimHandlerUpdateDto { Version = CurrentVersion });
+    [Fact]
+    public async Task CreateAsync_ClientHoldingTheInsuranceType_OpensClaimOwnedByClient()
+    {
+        SetupClient(TestData.NewClient(TestData.ClientId, TestData.CarType()));
+
+        var result = await _service.CreateAsync(TestData.ClientUser, NewClaimDto());
 
         Assert.Equal(ResultStatus.Success, result.Status);
-        Assert.Equal(AdjusterId, claim.HandlerId);
-        Assert.Equal(ClaimStatus.InProgress, claim.Status);
-        Assert.Equal(Now.UtcDateTime, claim.AssignedAt);
-        Assert.Equal(AdjusterId, result.Value!.HandlerId);
-        Assert.Equal("שמאי 2", result.Value.HandlerName);
+        _claims.Verify(c => c.Add(It.Is<Claim>(claim =>
+            claim.ClientId == TestData.ClientId &&
+            claim.InsuranceTypeId == TestData.CarTypeId &&
+            claim.Status == ClaimStatus.Opened &&
+            claim.OpenedAt == Now.UtcDateTime &&
+            claim.ClaimNumber.StartsWith("CLM-"))), Times.Once);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal("ביטוח רכב", result.Value!.InsuranceTypeName);
+    }
+
+    [Fact]
+    public async Task CreateAsync_SaveAsDraft_CreatesDraft()
+    {
+        SetupClient(TestData.NewClient(TestData.ClientId, TestData.CarType()));
+
+        var dto = NewClaimDto();
+        dto.SaveAsDraft = true;
+        var result = await _service.CreateAsync(TestData.ClientUser, dto);
+
+        Assert.Equal(ResultStatus.Success, result.Status);
+        Assert.Equal(ClaimStatus.Draft, result.Value!.Status);
+    }
+
+    [Fact]
+    public async Task CreateAsync_InsuranceTypeTheClientDoesNotHold_IsRejected()
+    {
+        SetupClient(TestData.NewClient(TestData.ClientId, TestData.HomeType()));
+
+        var result = await _service.CreateAsync(TestData.ClientUser, NewClaimDto());
+
+        Assert.Equal(ResultStatus.ValidationFailed, result.Status);
+        _claims.Verify(c => c.Add(It.IsAny<Claim>()), Times.Never);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(AppRoles.Manager)]
+    [InlineData(AppRoles.Appraiser)]
+    public async Task CreateAsync_EmployeeCannotOpenClaim(string role)
+    {
+        var result = await _service.CreateAsync(new CurrentUser(TestData.ManagerId, role), NewClaimDto());
+
+        Assert.Equal(ResultStatus.Forbidden, result.Status);
+        _claims.Verify(c => c.Add(It.IsAny<Claim>()), Times.Never);
+    }
+
+    // ---------- cancel / delete ----------
+
+    [Theory]
+    [InlineData(ClaimStatus.Draft)]
+    [InlineData(ClaimStatus.Opened)]
+    [InlineData(ClaimStatus.InTreatment)]
+    public async Task UpdateStatusAsync_ClientCancelsOwnUnfinishedClaim_Cancels(ClaimStatus current)
+    {
+        var claim = TestData.NewClaim(CurrentVersion, current);
+        SetupClaimForUpdate(claim);
+
+        var result = await _service.UpdateStatusAsync(TestData.ClientUser, claim.Id, StatusDto(ClaimStatus.Cancelled));
+
+        Assert.Equal(ResultStatus.Success, result.Status);
+        Assert.Equal(ClaimStatus.Cancelled, claim.Status);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(ClaimStatus.Approved)]
+    [InlineData(ClaimStatus.Rejected)]
+    [InlineData(ClaimStatus.Cancelled)]
+    public async Task UpdateStatusAsync_ClientCannotCancelFinishedClaim(ClaimStatus current)
+    {
+        var claim = TestData.NewClaim(CurrentVersion, current);
+        SetupClaimForUpdate(claim);
+
+        var result = await _service.UpdateStatusAsync(TestData.ClientUser, claim.Id, StatusDto(ClaimStatus.Cancelled));
+
+        Assert.Equal(ResultStatus.ValidationFailed, result.Status);
+        Assert.Equal(current, claim.Status);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateStatusAsync_ClientCannotCancelAnotherClientsClaim()
+    {
+        var claim = TestData.NewClaim(CurrentVersion, ClaimStatus.Opened, TestData.OtherClientId);
+        SetupClaimForUpdate(claim);
+
+        var result = await _service.UpdateStatusAsync(TestData.ClientUser, claim.Id, StatusDto(ClaimStatus.Cancelled));
+
+        Assert.Equal(ResultStatus.Forbidden, result.Status);
+        Assert.Equal(ClaimStatus.Opened, claim.Status);
+    }
+
+    [Fact]
+    public async Task UpdateStatusAsync_ClientSubmitsDraft_OpensIt()
+    {
+        var claim = TestData.NewClaim(CurrentVersion, ClaimStatus.Draft);
+        SetupClaimForUpdate(claim);
+
+        var result = await _service.UpdateStatusAsync(TestData.ClientUser, claim.Id, StatusDto(ClaimStatus.Opened));
+
+        Assert.Equal(ResultStatus.Success, result.Status);
+        Assert.Equal(ClaimStatus.Opened, claim.Status);
+    }
+
+    [Fact]
+    public async Task UpdateStatusAsync_HandlingAppraiserApproves()
+    {
+        var claim = TestData.NewClaim(CurrentVersion, ClaimStatus.InTreatment, handlerId: TestData.AppraiserId);
+        SetupClaimForUpdate(claim);
+
+        var result = await _service.UpdateStatusAsync(TestData.AppraiserUser, claim.Id, StatusDto(ClaimStatus.Approved));
+
+        Assert.Equal(ResultStatus.Success, result.Status);
+        Assert.Equal(ClaimStatus.Approved, claim.Status);
+    }
+
+    [Fact]
+    public async Task UpdateStatusAsync_AppraiserWhoDoesNotHandleTheClaim_IsForbidden()
+    {
+        var claim = TestData.NewClaim(CurrentVersion, ClaimStatus.InTreatment, handlerId: TestData.OtherAppraiserId);
+        SetupClaimForUpdate(claim);
+
+        var result = await _service.UpdateStatusAsync(TestData.AppraiserUser, claim.Id, StatusDto(ClaimStatus.Approved));
+
+        Assert.Equal(ResultStatus.Forbidden, result.Status);
+        Assert.Equal(ClaimStatus.InTreatment, claim.Status);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ClientDeletesOwnDraft()
+    {
+        var claim = TestData.NewClaim(CurrentVersion, ClaimStatus.Draft);
+        SetupClaimForUpdate(claim);
+
+        var result = await _service.DeleteAsync(TestData.ClientUser, claim.Id);
+
+        Assert.Equal(ResultStatus.Success, result.Status);
+        _claims.Verify(c => c.Remove(claim), Times.Once);
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task TakeAsync_ClaimAlreadyInProgress_ReturnsConflictWithoutSaving()
+    public async Task DeleteAsync_ClientCannotDeleteDraftOfAnotherClient()
     {
-        var claim = OpenCarClaim();
-        claim.Status = ClaimStatus.InProgress;
-        claim.HandlerId = OtherAdjusterId;
-        SetupClaim(claim);
-        SetupEmployee(Adjuster(AdjusterId, CarInsuranceTypeId));
+        var claim = TestData.NewClaim(CurrentVersion, ClaimStatus.Draft, TestData.OtherClientId);
+        SetupClaimForUpdate(claim);
 
-        var result = await _service.TakeAsync(claim.Id, AdjusterId, new ClaimHandlerUpdateDto { Version = CurrentVersion });
+        var result = await _service.DeleteAsync(TestData.ClientUser, claim.Id);
+
+        Assert.Equal(ResultStatus.Forbidden, result.Status);
+        _claims.Verify(c => c.Remove(It.IsAny<Claim>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ClientCannotDeleteClaimThatIsNotADraft()
+    {
+        var claim = TestData.NewClaim(CurrentVersion, ClaimStatus.Opened);
+        SetupClaimForUpdate(claim);
+
+        var result = await _service.DeleteAsync(TestData.ClientUser, claim.Id);
+
+        Assert.Equal(ResultStatus.ValidationFailed, result.Status);
+        _claims.Verify(c => c.Remove(It.IsAny<Claim>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(AppRoles.Manager)]
+    [InlineData(AppRoles.Appraiser)]
+    public async Task DeleteAsync_EmployeesCannotDeleteClaims(string role)
+    {
+        var claim = TestData.NewClaim(CurrentVersion, ClaimStatus.Draft);
+        SetupClaimForUpdate(claim);
+
+        var result = await _service.DeleteAsync(new CurrentUser(TestData.ManagerId, role), claim.Id);
+
+        Assert.Equal(ResultStatus.Forbidden, result.Status);
+        _claims.Verify(c => c.Remove(It.IsAny<Claim>()), Times.Never);
+    }
+
+    // ---------- take for handling ----------
+
+    [Fact]
+    public async Task TakeAsync_OpenClaimInSpecialization_AssignsHandlerAndCreatesReferralInOneSave()
+    {
+        var claim = TestData.NewClaim(CurrentVersion);
+        SetupClaimForUpdate(claim);
+        SetupAppraiser(TestData.NewAppraiser(TestData.AppraiserId, TestData.CarType()));
+
+        var result = await _service.TakeAsync(TestData.AppraiserUser, claim.Id, new ClaimHandlerUpdateDto { Version = CurrentVersion });
+
+        Assert.Equal(ResultStatus.Success, result.Status);
+        Assert.Equal(TestData.AppraiserId, claim.HandlerId);
+        Assert.Equal(ClaimStatus.InTreatment, claim.Status);
+        Assert.Equal(Now.UtcDateTime, claim.AssignedAt);
+        Assert.Equal("שמאי 2", result.Value!.HandlerName);
+        _referrals.Verify(r => r.Add(It.Is<Referral>(referral =>
+            referral.AppraiserId == TestData.AppraiserId &&
+            referral.Claim == claim &&
+            referral.ReferredAt == Now.UtcDateTime)), Times.Once);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task TakeAsync_ClaimAlreadyInTreatment_ReturnsConflictWithoutSaving()
+    {
+        var claim = TestData.NewClaim(CurrentVersion, ClaimStatus.InTreatment, handlerId: TestData.OtherAppraiserId);
+        SetupClaimForUpdate(claim);
+        SetupAppraiser(TestData.NewAppraiser(TestData.AppraiserId, TestData.CarType()));
+
+        var result = await _service.TakeAsync(TestData.AppraiserUser, claim.Id, new ClaimHandlerUpdateDto { Version = CurrentVersion });
 
         Assert.Equal(ResultStatus.Conflict, result.Status);
         Assert.Equal(ErrorMessages.ClaimTakenByAnother, result.Error);
-        Assert.Equal(OtherAdjusterId, claim.HandlerId);
+        Assert.Equal(TestData.OtherAppraiserId, claim.HandlerId);
+        _referrals.Verify(r => r.Add(It.IsAny<Referral>()), Times.Never);
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task TakeAsync_AdjusterOutsideSpecialization_ReturnsForbiddenWithoutSaving()
+    public async Task TakeAsync_LosingTheRaceAtSaveTime_ReturnsConflict()
     {
-        var claim = OpenCarClaim();
-        SetupClaim(claim);
-        SetupEmployee(Adjuster(AdjusterId, HomeInsuranceTypeId));
-
-        var result = await _service.TakeAsync(claim.Id, AdjusterId, new ClaimHandlerUpdateDto { Version = CurrentVersion });
-
-        Assert.Equal(ResultStatus.Forbidden, result.Status);
-        Assert.Null(claim.HandlerId);
-        Assert.Equal(ClaimStatus.Open, claim.Status);
-        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task TakeAsync_LosesRaceAtSave_ReturnsConflict()
-    {
-        var claim = OpenCarClaim();
-        SetupClaim(claim);
-        SetupEmployee(Adjuster(AdjusterId, CarInsuranceTypeId));
+        var claim = TestData.NewClaim(CurrentVersion);
+        SetupClaimForUpdate(claim);
+        SetupAppraiser(TestData.NewAppraiser(TestData.AppraiserId, TestData.CarType()));
         _unitOfWork
             .Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ConcurrencyConflictException("conflict", new Exception()));
+            .ThrowsAsync(new ConcurrencyConflictException("lost", new InvalidOperationException()));
 
-        var result = await _service.TakeAsync(claim.Id, AdjusterId, new ClaimHandlerUpdateDto { Version = CurrentVersion });
+        var result = await _service.TakeAsync(TestData.AppraiserUser, claim.Id, new ClaimHandlerUpdateDto { Version = CurrentVersion });
 
         Assert.Equal(ResultStatus.Conflict, result.Status);
         Assert.Equal(ErrorMessages.ClaimTakenByAnother, result.Error);
@@ -106,139 +283,145 @@ public class ClaimServiceTests
     [Fact]
     public async Task TakeAsync_StaleVersion_ReturnsConflictWithoutSaving()
     {
-        var claim = OpenCarClaim();
-        SetupClaim(claim);
-        SetupEmployee(Adjuster(AdjusterId, CarInsuranceTypeId));
+        var claim = TestData.NewClaim(CurrentVersion);
+        SetupClaimForUpdate(claim);
+        SetupAppraiser(TestData.NewAppraiser(TestData.AppraiserId, TestData.CarType()));
 
-        var result = await _service.TakeAsync(claim.Id, AdjusterId, new ClaimHandlerUpdateDto { Version = Guid.NewGuid() });
+        var result = await _service.TakeAsync(TestData.AppraiserUser, claim.Id, new ClaimHandlerUpdateDto { Version = Guid.NewGuid() });
 
         Assert.Equal(ResultStatus.Conflict, result.Status);
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task TakeAsync_MissingClaim_ReturnsNotFound()
+    public async Task TakeAsync_ClaimOutsideSpecialization_IsForbiddenWithoutSaving()
     {
-        _claims.Setup(r => r.GetForUpdateAsync(It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync((Claim?)null);
+        var claim = TestData.NewClaim(CurrentVersion); // car claim
+        SetupClaimForUpdate(claim);
+        SetupAppraiser(TestData.NewAppraiser(TestData.AppraiserId, TestData.HomeType())); // home specialist only
 
-        var result = await _service.TakeAsync(99, AdjusterId, new ClaimHandlerUpdateDto { Version = CurrentVersion });
+        var result = await _service.TakeAsync(TestData.AppraiserUser, claim.Id, new ClaimHandlerUpdateDto { Version = CurrentVersion });
+
+        Assert.Equal(ResultStatus.Forbidden, result.Status);
+        Assert.Null(claim.HandlerId);
+        _referrals.Verify(r => r.Add(It.IsAny<Referral>()), Times.Never);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task TakeAsync_ClosedClaim_IsRejected()
+    {
+        var claim = TestData.NewClaim(CurrentVersion, ClaimStatus.Cancelled);
+        SetupClaimForUpdate(claim);
+
+        var result = await _service.TakeAsync(TestData.AppraiserUser, claim.Id, new ClaimHandlerUpdateDto { Version = CurrentVersion });
+
+        Assert.Equal(ResultStatus.ValidationFailed, result.Status);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task TakeAsync_Draft_LooksLikeANonExistingClaim()
+    {
+        var claim = TestData.NewClaim(CurrentVersion, ClaimStatus.Draft);
+        SetupClaimForUpdate(claim);
+
+        var result = await _service.TakeAsync(TestData.AppraiserUser, claim.Id, new ClaimHandlerUpdateDto { Version = CurrentVersion });
 
         Assert.Equal(ResultStatus.NotFound, result.Status);
     }
 
     [Fact]
-    public async Task UpdateStatusAsync_ByEmployeeWhoIsNotTheHandler_ReturnsForbidden()
+    public async Task TakeAsync_ManagerCannotTakeClaims()
     {
-        var claim = OpenCarClaim();
-        claim.Status = ClaimStatus.InProgress;
-        claim.HandlerId = OtherAdjusterId;
-        SetupClaim(claim);
-
-        var result = await _service.UpdateStatusAsync(claim.Id, AdjusterId,
-            new ClaimStatusUpdateDto { Status = ClaimStatus.Approved, Version = CurrentVersion });
+        var result = await _service.TakeAsync(TestData.ManagerUser, 100, new ClaimHandlerUpdateDto { Version = CurrentVersion });
 
         Assert.Equal(ResultStatus.Forbidden, result.Status);
-        Assert.Equal(ClaimStatus.InProgress, claim.Status);
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // ---------- who sees which claims ----------
+
     [Fact]
-    public async Task UpdateStatusAsync_ByHandler_ChangesStatus()
+    public async Task GetPagedAsync_Client_IsRestrictedToOwnClaims()
     {
-        var claim = OpenCarClaim();
-        claim.Status = ClaimStatus.InProgress;
-        claim.HandlerId = AdjusterId;
-        SetupClaim(claim);
+        SetupPage();
 
-        var result = await _service.UpdateStatusAsync(claim.Id, AdjusterId,
-            new ClaimStatusUpdateDto { Status = ClaimStatus.Approved, Version = CurrentVersion });
+        await _service.GetPagedAsync(TestData.ClientUser, new ClaimQueryParameters());
 
-        Assert.Equal(ResultStatus.Success, result.Status);
-        Assert.Equal(ClaimStatus.Approved, claim.Status);
-        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _claims.Verify(c => c.GetPagedAsync(It.IsAny<ClaimQueryParameters>(),
+            It.Is<ClaimAccess>(a => a.ClientId == TestData.ClientId && a.AppraiserId == null),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task CreateAsync_OnExpiredPolicy_ReturnsValidationFailed()
+    public async Task GetPagedAsync_Appraiser_IsRestrictedToOwnClaimsAndOwnSpecializations()
     {
-        var expired = CarPolicy();
-        expired.StartDate = new DateTime(2022, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        expired.EndDate = new DateTime(2023, 12, 31, 0, 0, 0, DateTimeKind.Utc);
-        _policies.Setup(r => r.GetByIdAsync(expired.Id, It.IsAny<CancellationToken>())).ReturnsAsync(expired);
+        SetupPage();
+        SetupAppraiser(TestData.NewAppraiser(TestData.AppraiserId, TestData.CarType(), TestData.HomeType()));
 
-        var result = await _service.CreateAsync(new ClaimCreateDto
-        {
-            PolicyId = expired.Id,
-            Title = "תאונה",
-            Description = "פגיעה בדלת",
-            Amount = 1000m
-        });
+        await _service.GetPagedAsync(TestData.AppraiserUser, new ClaimQueryParameters());
 
-        Assert.Equal(ResultStatus.ValidationFailed, result.Status);
-        _claims.Verify(r => r.Add(It.IsAny<Claim>()), Times.Never);
+        _claims.Verify(c => c.GetPagedAsync(It.IsAny<ClaimQueryParameters>(),
+            It.Is<ClaimAccess>(a => a.ClientId == null && a.AppraiserId == TestData.AppraiserId &&
+                                    a.SpecializationIds.SequenceEqual(new[] { TestData.CarTypeId, TestData.HomeTypeId })),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task CreateAsync_OnActivePolicy_CreatesOpenClaim()
+    public async Task GetByIdAsync_AnotherClientsClaim_LooksLikeANonExistingClaim()
     {
-        var policy = CarPolicy();
-        _policies.Setup(r => r.GetByIdAsync(policy.Id, It.IsAny<CancellationToken>())).ReturnsAsync(policy);
+        _claims.Setup(c => c.GetByIdAsync(100, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TestData.NewClaim(CurrentVersion, ClaimStatus.Opened, TestData.OtherClientId));
 
-        var result = await _service.CreateAsync(new ClaimCreateDto
-        {
-            PolicyId = policy.Id,
-            Title = "תאונה",
-            Description = "פגיעה בדלת",
-            Amount = 1000m
-        });
+        var result = await _service.GetByIdAsync(TestData.ClientUser, 100);
 
-        Assert.Equal(ResultStatus.Success, result.Status);
-        Assert.Equal(ClaimStatus.Open, result.Value!.Status);
-        Assert.Null(result.Value.HandlerId);
-        _claims.Verify(r => r.Add(It.Is<Claim>(c => c.PolicyId == policy.Id && c.Status == ClaimStatus.Open)), Times.Once);
-        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(ResultStatus.NotFound, result.Status);
     }
 
-    private void SetupClaim(Claim claim) =>
-        _claims.Setup(r => r.GetForUpdateAsync(claim.Id, It.IsAny<CancellationToken>())).ReturnsAsync(claim);
-
-    private void SetupEmployee(Employee employee) =>
-        _employees.Setup(r => r.GetByIdAsync(employee.Id, It.IsAny<CancellationToken>())).ReturnsAsync(employee);
-
-    private static Policy CarPolicy() => new()
+    [Fact]
+    public async Task GetByIdAsync_ManagerDoesNotSeeDrafts()
     {
-        Id = 1,
-        PolicyNumber = "CAR-1001",
-        HolderName = "ישראל ישראלי",
-        InsuranceTypeId = CarInsuranceTypeId,
-        InsuranceType = new InsuranceType { Id = CarInsuranceTypeId, Name = "ביטוח רכב" },
-        StartDate = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-        EndDate = new DateTime(2030, 12, 31, 0, 0, 0, DateTimeKind.Utc)
+        _claims.Setup(c => c.GetByIdAsync(100, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TestData.NewClaim(CurrentVersion, ClaimStatus.Draft));
+
+        var result = await _service.GetByIdAsync(TestData.ManagerUser, 100);
+
+        Assert.Equal(ResultStatus.NotFound, result.Status);
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_AppraiserDoesNotSeeClaimHandledByAnotherAppraiser()
+    {
+        _claims.Setup(c => c.GetByIdAsync(100, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TestData.NewClaim(CurrentVersion, ClaimStatus.InTreatment, handlerId: TestData.OtherAppraiserId));
+
+        var result = await _service.GetByIdAsync(TestData.AppraiserUser, 100);
+
+        Assert.Equal(ResultStatus.NotFound, result.Status);
+    }
+
+    // ---------- helpers ----------
+
+    private static ClaimCreateDto NewClaimDto() => new()
+    {
+        InsuranceTypeId = TestData.CarTypeId,
+        Description = "פגיעה ברכב בחניה",
+        Amount = 3200m
     };
 
-    private static Claim OpenCarClaim()
-    {
-        var policy = CarPolicy();
-        return new Claim
-        {
-            Id = 10,
-            Title = "תאונה בצומת",
-            Description = "פגיעה בדלת",
-            Amount = 5000m,
-            Status = ClaimStatus.Open,
-            PolicyId = policy.Id,
-            Policy = policy,
-            CreatedAt = Now.UtcDateTime.AddDays(-3),
-            Version = CurrentVersion
-        };
-    }
+    private static ClaimStatusUpdateDto StatusDto(ClaimStatus status) => new() { Status = status, Version = CurrentVersion };
 
-    private static Employee Adjuster(int id, params int[] specializationIds) => new()
-    {
-        Id = id,
-        FullName = $"שמאי {id}",
-        Username = $"adjuster{id}",
-        Role = EmployeeRole.Adjuster,
-        Specializations = specializationIds.Select(t => new InsuranceType { Id = t, Name = $"type {t}" }).ToList()
-    };
+    private void SetupClient(Client client) =>
+        _clients.Setup(c => c.GetByIdAsync(client.Id, It.IsAny<CancellationToken>())).ReturnsAsync(client);
+
+    private void SetupAppraiser(Employee appraiser) =>
+        _employees.Setup(e => e.GetByIdAsync(appraiser.Id, It.IsAny<CancellationToken>())).ReturnsAsync(appraiser);
+
+    private void SetupClaimForUpdate(Claim claim) =>
+        _claims.Setup(c => c.GetForUpdateAsync(claim.Id, It.IsAny<CancellationToken>())).ReturnsAsync(claim);
+
+    private void SetupPage() =>
+        _claims.Setup(c => c.GetPagedAsync(It.IsAny<ClaimQueryParameters>(), It.IsAny<ClaimAccess>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((new List<Claim>(), 0));
 }

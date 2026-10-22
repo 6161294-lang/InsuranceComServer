@@ -26,8 +26,9 @@ public static class DependencyInjection
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
 
         services.AddScoped<IInsuranceTypeService, InsuranceTypeService>();
-        services.AddScoped<IPolicyService, PolicyService>();
+        services.AddScoped<IClientService, ClientService>();
         services.AddScoped<IClaimService, ClaimService>();
+        services.AddScoped<IReferralService, ReferralService>();
         services.AddScoped<IEmployeeService, EmployeeService>();
         services.AddScoped<IAuthService, AuthService>();
 

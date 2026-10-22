@@ -9,10 +9,11 @@ public class AppDbContext : DbContext
     {
     }
 
-    public DbSet<InsuranceType> InsuranceTypes => Set<InsuranceType>();
-    public DbSet<Policy> Policies => Set<Policy>();
-    public DbSet<Claim> Claims => Set<Claim>();
     public DbSet<Employee> Employees => Set<Employee>();
+    public DbSet<Client> Clients => Set<Client>();
+    public DbSet<InsuranceType> InsuranceTypes => Set<InsuranceType>();
+    public DbSet<Claim> Claims => Set<Claim>();
+    public DbSet<Referral> Referrals => Set<Referral>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

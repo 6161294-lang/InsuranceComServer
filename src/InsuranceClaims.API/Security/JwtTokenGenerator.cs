@@ -1,7 +1,6 @@
 using System.Security.Claims;
 using System.Text;
 using InsuranceClaims.Core.Common;
-using InsuranceClaims.Core.Entities;
 using InsuranceClaims.Core.Interfaces.Services;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -22,17 +21,17 @@ public class JwtTokenGenerator : ITokenGenerator
         _timeProvider = timeProvider;
     }
 
-    public (string Token, DateTime ExpiresAt) GenerateToken(Employee employee)
+    public (string Token, DateTime ExpiresAt) GenerateToken(int userId, string fullName, string email, string role)
     {
         var now = _timeProvider.GetUtcNow().UtcDateTime;
         var expiresAt = now.AddMinutes(_settings.ExpiryMinutes);
 
         var claims = new List<SecurityClaim>
         {
-            new(AppClaimTypes.EmployeeId, employee.Id.ToString()),
-            new(AppClaimTypes.Name, employee.FullName),
-            new(AppClaimTypes.Username, employee.Username),
-            new(AppClaimTypes.Role, employee.Role.ToString()),
+            new(AppClaimTypes.UserId, userId.ToString()),
+            new(AppClaimTypes.Name, fullName),
+            new(AppClaimTypes.Email, email),
+            new(AppClaimTypes.Role, role),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 

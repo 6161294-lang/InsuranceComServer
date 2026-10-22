@@ -80,27 +80,6 @@ namespace InsuranceClaims.Data.Migrations
                 keyValue: 9,
                 column: "Version",
                 value: new Guid("00000000-0000-0000-0000-000000000009"));
-
-            migrationBuilder.UpdateData(
-                table: "Claims",
-                keyColumn: "Id",
-                keyValue: 10,
-                column: "Version",
-                value: new Guid("00000000-0000-0000-0000-000000000010"));
-
-            migrationBuilder.UpdateData(
-                table: "Claims",
-                keyColumn: "Id",
-                keyValue: 11,
-                column: "Version",
-                value: new Guid("00000000-0000-0000-0000-000000000011"));
-
-            migrationBuilder.UpdateData(
-                table: "Claims",
-                keyColumn: "Id",
-                keyValue: 12,
-                column: "Version",
-                value: new Guid("00000000-0000-0000-0000-000000000012"));
         }
 
         /// <inheritdoc />

@@ -1,6 +1,5 @@
 using InsuranceClaims.Core.DTOs;
 using InsuranceClaims.Core.Entities;
-using InsuranceClaims.Core.Enums;
 using InsuranceClaims.Core.Interfaces.Repositories;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,16 +16,16 @@ public class EmployeeRepository : IEmployeeRepository
 
     public async Task<(IReadOnlyList<Employee> Items, int TotalCount)> GetPagedAsync(PagingParameters paging, CancellationToken cancellationToken = default)
     {
-        IQueryable<Employee> employees = _context.Employees.AsNoTracking();
+        var totalCount = await _context.Employees.CountAsync(cancellationToken);
 
-        var totalCount = await employees.CountAsync(cancellationToken);
-
-        var items = await employees
+        var items = await _context.Employees
+            .AsNoTracking()
             .OrderBy(e => e.FullName)
             .ThenBy(e => e.Id)
+            .Include(e => e.Specializations)
             .Skip((paging.Page - 1) * paging.PageSize)
             .Take(paging.PageSize)
-            .Include(e => e.Specializations)
+            .AsSplitQuery()
             .ToListAsync(cancellationToken);
 
         return (items, totalCount);
@@ -43,17 +42,18 @@ public class EmployeeRepository : IEmployeeRepository
             .Include(e => e.Specializations)
             .FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
 
-    public Task<Employee?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default) =>
+    public Task<Employee?> GetByEmailAsync(string email, CancellationToken cancellationToken = default) =>
         _context.Employees
             .AsNoTracking()
             .Include(e => e.Specializations)
-            .FirstOrDefaultAsync(e => e.Username == username, cancellationToken);
+            .FirstOrDefaultAsync(e => e.Email == email, cancellationToken);
 
-    public Task<bool> UsernameExistsAsync(string username, CancellationToken cancellationToken = default) =>
-        _context.Employees.AnyAsync(e => e.Username == username, cancellationToken);
+    public Task<bool> EmailExistsAsync(string email, CancellationToken cancellationToken = default) =>
+        _context.Employees.AnyAsync(e => e.Email == email, cancellationToken);
 
-    public Task<bool> HasClaimsInProgressAsync(int id, CancellationToken cancellationToken = default) =>
-        _context.Claims.AnyAsync(c => c.HandlerId == id && c.Status == ClaimStatus.InProgress, cancellationToken);
+    public async Task<bool> HasWorkHistoryAsync(int id, CancellationToken cancellationToken = default) =>
+        await _context.Claims.AnyAsync(c => c.HandlerId == id, cancellationToken)
+        || await _context.Referrals.AnyAsync(r => r.AppraiserId == id, cancellationToken);
 
     public void Add(Employee employee) => _context.Employees.Add(employee);
 

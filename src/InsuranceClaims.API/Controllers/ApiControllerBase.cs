@@ -8,9 +8,15 @@ namespace InsuranceClaims.API.Controllers;
 /// <summary>Translates business results (OperationResult) to HTTP responses with the uniform error body.</summary>
 [ApiController]
 [Produces("application/json")]
+[ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+[ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+[ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status403Forbidden)]
+[ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+[ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status409Conflict)]
 public abstract class ApiControllerBase : ControllerBase
 {
-    protected int CurrentEmployeeId => User.GetEmployeeId();
+    /// <summary>The authenticated caller (id and role from the JWT).</summary>
+    protected CurrentUser CurrentUser => User.ToCurrentUser();
 
     /// <summary>Success without a body becomes 204 No Content.</summary>
     protected IActionResult NoContentOrError(OperationResult result) =>

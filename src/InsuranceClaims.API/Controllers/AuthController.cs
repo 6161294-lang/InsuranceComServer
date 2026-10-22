@@ -1,4 +1,3 @@
-using InsuranceClaims.API.Models;
 using InsuranceClaims.Core.DTOs;
 using InsuranceClaims.Core.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -17,27 +16,23 @@ public class AuthController : ApiControllerBase
         _authService = authService;
     }
 
-    /// <summary>Registers a new adjuster. The password is stored only as a BCrypt hash.</summary>
+    /// <summary>Registers a new client. The password is stored only as a BCrypt hash.</summary>
     [HttpPost("register")]
-    [ProducesResponseType(typeof(EmployeeDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<EmployeeDto>> Register(RegisterDto dto, CancellationToken cancellationToken)
+    [ProducesResponseType(typeof(ClientDto), StatusCodes.Status201Created)]
+    public async Task<ActionResult<ClientDto>> Register(RegisterClientDto dto, CancellationToken cancellationToken)
     {
-        var result = await _authService.RegisterAsync(dto, cancellationToken);
+        var result = await _authService.RegisterClientAsync(dto, cancellationToken);
         if (!result.IsSuccess)
         {
             return Error(result);
         }
 
-        return CreatedAtAction(nameof(EmployeesController.GetById), "Employees", new { id = result.Value!.Id }, result.Value);
+        return Created($"/api/clients/{result.Value!.Id}", result.Value);
     }
 
-    /// <summary>Logs in and returns a JWT to send as "Authorization: Bearer {token}".</summary>
+    /// <summary>Logs in a client, a manager or an appraiser and returns a JWT to send as "Authorization: Bearer {token}".</summary>
     [HttpPost("login")]
     [ProducesResponseType(typeof(AuthResponseDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthResponseDto>> Login(LoginDto dto, CancellationToken cancellationToken) =>
         OkOrError(await _authService.LoginAsync(dto, cancellationToken));
 }

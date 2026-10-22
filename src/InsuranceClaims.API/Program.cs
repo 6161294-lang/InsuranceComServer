@@ -7,6 +7,7 @@ using InsuranceClaims.Core.Interfaces.Services;
 using InsuranceClaims.Data;
 using InsuranceClaims.Service;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using NLog;
 using NLog.Web;
 
@@ -15,6 +16,12 @@ var bootstrapLogger = LogManager.Setup().LoadConfigurationFromAppSettings().GetC
 try
 {
     var builder = WebApplication.CreateBuilder(args);
+
+    // Hosting platforms (Render, Docker) tell the app which port to listen on through PORT.
+    if (Environment.GetEnvironmentVariable("PORT") is { Length: > 0 } port)
+    {
+        builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+    }
 
     // ---------- Logging: NLog behind ILogger (levels come from the "Logging" section) ----------
     builder.Logging.ClearProviders();
@@ -32,8 +39,9 @@ try
     if (string.IsNullOrWhiteSpace(connectionString))
     {
         throw new InvalidOperationException(
-            "Connection string 'DefaultConnection' is missing. Store it in User Secrets: " +
-            "dotnet user-secrets set \"ConnectionStrings:DefaultConnection\" \"Host=localhost;Port=5432;Database=insurance_claims;Username=...;Password=...\" --project src/InsuranceClaims.API");
+            "Connection string 'DefaultConnection' is missing. Locally store it in User Secrets: " +
+            "dotnet user-secrets set \"ConnectionStrings:DefaultConnection\" \"Host=localhost;Port=5432;Database=insurance_claims;Username=...;Password=...\" --project src/InsuranceClaims.API " +
+            "(on a server use the ConnectionStrings__DefaultConnection environment variable).");
     }
 
     // ---------- Services ----------
@@ -45,7 +53,7 @@ try
     //    whole application, so it would keep the first request's DbContext forever - sharing it across threads,
     //    serving stale tracked data and using it after it was disposed. ValidateScopes above throws on this.
     //  * Stateless helpers (password hasher, token generator, TimeProvider) are Singletons.
-    builder.Services.AddDataLayer(connectionString);
+    builder.Services.AddDataLayer(connectionString.ToNpgsqlConnectionString());
     builder.Services.AddServiceLayer(builder.Configuration["AutoMapper:LicenseKey"]);
     builder.Services.AddSingleton<ITokenGenerator, JwtTokenGenerator>();
 
@@ -77,26 +85,47 @@ try
         });
 
     builder.Services.AddSwaggerWithJwt();
+    builder.Services.AddHealthChecks();
 
     var app = builder.Build();
+
+    // ---------- Database: apply migrations (and with them the seed data) on startup ----------
+    if (app.Configuration.GetValue("Database:MigrateOnStartup", true))
+    {
+        using var scope = app.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.MigrateAsync();
+    }
 
     // ---------- Pipeline (order matters) ----------
     app.UseMiddleware<ExceptionHandlingMiddleware>(); // 1. outermost: catches everything below
     app.UseMiddleware<CorrelationIdMiddleware>();     // 2. id + logging scope for the rest of the request
     app.UseMiddleware<RequestLoggingMiddleware>();    // 3. one log line per request, with the id
 
-    if (app.Environment.IsDevelopment())
+    app.UseSwagger();
+    app.UseSwaggerUI();
+
+    // The React client is built into wwwroot (see the Dockerfile) and served by the API itself.
+    var serveClient = File.Exists(Path.Combine(app.Environment.WebRootPath ?? string.Empty, "index.html"));
+    if (serveClient)
     {
-        app.UseSwagger();
-        app.UseSwaggerUI();
+        app.UseDefaultFiles();
+        app.UseStaticFiles();
     }
 
     app.UseAuthentication(); // who are you - before -
     app.UseAuthorization();  // - what are you allowed to do
 
     app.MapControllers();
+    app.MapHealthChecks("/health");
 
-    app.Run();
+    if (serveClient)
+    {
+        // Client-side routes (paths without a file extension) fall back to index.html, so refreshing a page works.
+        // Unknown /api, /swagger and /health paths stay 404, and real files are left to the static files middleware.
+        app.MapFallbackToFile("/{*path:regex(^(?!api/|swagger|health)[^.]*$)}", "index.html");
+    }
+
+    await app.RunAsync();
 }
 catch (Exception ex) when (ex is not HostAbortedException)
 {

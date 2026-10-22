@@ -3,8 +3,10 @@ namespace InsuranceClaims.Core.Enums;
 /// <summary>Lifecycle of an insurance claim.</summary>
 public enum ClaimStatus
 {
-    Open = 0,
-    InProgress = 1,
-    Approved = 2,
-    Rejected = 3
+    Draft = 0,
+    Opened = 1,
+    InTreatment = 2,
+    Approved = 3,
+    Rejected = 4,
+    Cancelled = 5
 }

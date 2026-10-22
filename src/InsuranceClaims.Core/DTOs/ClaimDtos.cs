@@ -3,26 +3,26 @@ using InsuranceClaims.Core.Enums;
 
 namespace InsuranceClaims.Core.DTOs;
 
+/// <summary>Opens a claim (client only). A draft is saved privately; otherwise the claim is opened right away.</summary>
 public class ClaimCreateDto
 {
     [Range(1, int.MaxValue)]
-    public int PolicyId { get; set; }
-
-    [Required, StringLength(150, MinimumLength = 3)]
-    public string Title { get; set; } = string.Empty;
+    public int InsuranceTypeId { get; set; }
 
     [Required, StringLength(2000, MinimumLength = 3)]
     public string Description { get; set; } = string.Empty;
 
     [Range(typeof(decimal), "0.01", "100000000")]
     public decimal Amount { get; set; }
+
+    public bool SaveAsDraft { get; set; }
 }
 
-/// <summary>Update of the claim details (manager only).</summary>
+/// <summary>Update of a draft claim's details (the owning client only).</summary>
 public class ClaimUpdateDto
 {
-    [Required, StringLength(150, MinimumLength = 3)]
-    public string Title { get; set; } = string.Empty;
+    [Range(1, int.MaxValue)]
+    public int InsuranceTypeId { get; set; }
 
     [Required, StringLength(2000, MinimumLength = 3)]
     public string Description { get; set; } = string.Empty;
@@ -36,7 +36,7 @@ public class ClaimUpdateDto
 }
 
 /// <summary>
-/// Update of the claim handler ("take for handling"). The new handler is the authenticated adjuster.
+/// Update of the claim handler ("take for handling"). The new handler is the authenticated appraiser.
 /// </summary>
 public class ClaimHandlerUpdateDto
 {
@@ -45,7 +45,7 @@ public class ClaimHandlerUpdateDto
     public Guid? Version { get; set; }
 }
 
-/// <summary>Status change by the current handler.</summary>
+/// <summary>Status change: submit a draft, cancel (client) or approve / reject (handling appraiser).</summary>
 public class ClaimStatusUpdateDto
 {
     [Required, EnumDataType(typeof(ClaimStatus))]
@@ -59,15 +59,15 @@ public class ClaimStatusUpdateDto
 public class ClaimDto
 {
     public int Id { get; set; }
-    public string Title { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public decimal Amount { get; set; }
-    public ClaimStatus Status { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public int PolicyId { get; set; }
-    public string PolicyNumber { get; set; } = string.Empty;
+    public string ClaimNumber { get; set; } = string.Empty;
+    public int ClientId { get; set; }
+    public string ClientName { get; set; } = string.Empty;
     public int InsuranceTypeId { get; set; }
     public string InsuranceTypeName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public DateTime OpenedAt { get; set; }
+    public ClaimStatus Status { get; set; }
     public int? HandlerId { get; set; }
     public string? HandlerName { get; set; }
     public DateTime? AssignedAt { get; set; }
@@ -76,17 +76,24 @@ public class ClaimDto
 
 public enum ClaimSortField
 {
-    CreatedAt,
+    OpenedAt,
     Amount,
-    Status,
-    Title
+    Status
+}
+
+/// <summary>Which part of the visible claims to list (appraisers: their own claims, or the open claims they may take).</summary>
+public enum ClaimScope
+{
+    All,
+    Mine,
+    Available
 }
 
 public class ClaimQueryParameters : PagingParameters
 {
     public ClaimStatus? Status { get; set; }
     public int? InsuranceTypeId { get; set; }
-    public int? HandlerId { get; set; }
-    public ClaimSortField SortBy { get; set; } = ClaimSortField.CreatedAt;
+    public ClaimScope Scope { get; set; } = ClaimScope.All;
+    public ClaimSortField SortBy { get; set; } = ClaimSortField.OpenedAt;
     public bool Descending { get; set; } = true;
 }

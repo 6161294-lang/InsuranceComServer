@@ -22,6 +22,43 @@ namespace InsuranceClaims.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ClientInsuranceTypes", b =>
+                {
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("InsuranceTypeId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ClientId", "InsuranceTypeId");
+
+                    b.HasIndex("InsuranceTypeId");
+
+                    b.ToTable("ClientInsuranceTypes");
+
+                    b.HasData(
+                        new
+                        {
+                            ClientId = 1,
+                            InsuranceTypeId = 1
+                        },
+                        new
+                        {
+                            ClientId = 1,
+                            InsuranceTypeId = 2
+                        },
+                        new
+                        {
+                            ClientId = 2,
+                            InsuranceTypeId = 1
+                        },
+                        new
+                        {
+                            ClientId = 2,
+                            InsuranceTypeId = 3
+                        });
+                });
+
             modelBuilder.Entity("EmployeeSpecializations", b =>
                 {
                     b.Property<int>("EmployeeId")
@@ -75,8 +112,13 @@ namespace InsuranceClaims.Data.Migrations
                     b.Property<DateTime?>("AssignedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
+                    b.Property<string>("ClaimNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Description")
                         .IsRequired()
@@ -86,18 +128,16 @@ namespace InsuranceClaims.Data.Migrations
                     b.Property<int?>("HandlerId")
                         .HasColumnType("integer");
 
-                    b.Property<int>("PolicyId")
+                    b.Property<int>("InsuranceTypeId")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime>("OpenedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("character varying(150)");
 
                     b.Property<Guid>("Version")
                         .IsConcurrencyToken()
@@ -105,9 +145,14 @@ namespace InsuranceClaims.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ClaimNumber")
+                        .IsUnique();
+
+                    b.HasIndex("ClientId");
+
                     b.HasIndex("HandlerId");
 
-                    b.HasIndex("PolicyId");
+                    b.HasIndex("InsuranceTypeId");
 
                     b.HasIndex("Status");
 
@@ -118,133 +163,187 @@ namespace InsuranceClaims.Data.Migrations
                         {
                             Id = 1,
                             Amount = 12500m,
-                            CreatedAt = new DateTime(2026, 9, 1, 8, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "פגיעה בדלת שמאל בצומת עזריאלי",
-                            PolicyId = 1,
-                            Status = "Open",
-                            Title = "תאונה בצומת",
+                            ClaimNumber = "CLM-0001",
+                            ClientId = 1,
+                            Description = "תאונה בצומת - פגיעה בדלת שמאל",
+                            InsuranceTypeId = 1,
+                            OpenedAt = new DateTime(2026, 9, 1, 8, 0, 0, 0, DateTimeKind.Utc),
+                            Status = "Opened",
                             Version = new Guid("00000000-0000-0000-0000-000000000001")
                         },
                         new
                         {
                             Id = 2,
                             Amount = 2300m,
-                            CreatedAt = new DateTime(2026, 9, 2, 9, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "אבן שהועפה מרכב בכביש 6",
-                            PolicyId = 1,
-                            Status = "Open",
-                            Title = "שבר שמשה קדמית",
+                            ClaimNumber = "CLM-0002",
+                            ClientId = 1,
+                            Description = "שבר בשמשה הקדמית (טיוטה)",
+                            InsuranceTypeId = 1,
+                            OpenedAt = new DateTime(2026, 9, 2, 9, 0, 0, 0, DateTimeKind.Utc),
+                            Status = "Draft",
                             Version = new Guid("00000000-0000-0000-0000-000000000002")
                         },
                         new
                         {
                             Id = 3,
-                            Amount = 4100m,
-                            CreatedAt = new DateTime(2026, 9, 3, 10, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "רכב פגע ברכב החונה ונמלט",
-                            PolicyId = 2,
-                            Status = "Open",
-                            Title = "פגיעה בחניה",
+                            Amount = 9500m,
+                            ClaimNumber = "CLM-0003",
+                            ClientId = 1,
+                            Description = "נזילה מהתקרה - נזק מים בסלון",
+                            InsuranceTypeId = 2,
+                            OpenedAt = new DateTime(2026, 9, 3, 10, 0, 0, 0, DateTimeKind.Utc),
+                            Status = "Opened",
                             Version = new Guid("00000000-0000-0000-0000-000000000003")
                         },
                         new
                         {
                             Id = 4,
-                            Amount = 1800m,
-                            CreatedAt = new DateTime(2026, 9, 4, 11, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "שתי מראות צד נגנבו בלילה",
-                            PolicyId = 2,
-                            Status = "Open",
-                            Title = "גניבת מראות",
+                            Amount = 7600m,
+                            AssignedAt = new DateTime(2026, 9, 5, 9, 0, 0, 0, DateTimeKind.Utc),
+                            ClaimNumber = "CLM-0004",
+                            ClientId = 1,
+                            Description = "נזק מברד - שקעים בגג ובמכסה המנוע",
+                            HandlerId = 2,
+                            InsuranceTypeId = 1,
+                            OpenedAt = new DateTime(2026, 9, 4, 11, 0, 0, 0, DateTimeKind.Utc),
+                            Status = "InTreatment",
                             Version = new Guid("00000000-0000-0000-0000-000000000004")
                         },
                         new
                         {
                             Id = 5,
-                            Amount = 7600m,
-                            CreatedAt = new DateTime(2026, 9, 5, 12, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "שקעים בגג ובמכסה המנוע",
-                            PolicyId = 1,
-                            Status = "Open",
-                            Title = "נזק מברד",
+                            Amount = 18900m,
+                            ClaimNumber = "CLM-0005",
+                            ClientId = 2,
+                            Description = "התנגשות מאחור בכביש מהיר",
+                            InsuranceTypeId = 1,
+                            OpenedAt = new DateTime(2026, 9, 6, 13, 0, 0, 0, DateTimeKind.Utc),
+                            Status = "Opened",
                             Version = new Guid("00000000-0000-0000-0000-000000000005")
                         },
                         new
                         {
                             Id = 6,
-                            Amount = 18900m,
-                            CreatedAt = new DateTime(2026, 9, 6, 13, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "התנגשות מאחור בפקק",
-                            PolicyId = 2,
-                            Status = "Open",
-                            Title = "תאונה בכביש מהיר",
+                            Amount = 35000m,
+                            ClaimNumber = "CLM-0006",
+                            ClientId = 2,
+                            Description = "החזר על ניתוח ברך פרטי",
+                            InsuranceTypeId = 3,
+                            OpenedAt = new DateTime(2026, 9, 7, 14, 0, 0, 0, DateTimeKind.Utc),
+                            Status = "Opened",
                             Version = new Guid("00000000-0000-0000-0000-000000000006")
                         },
                         new
                         {
                             Id = 7,
-                            Amount = 9500m,
-                            CreatedAt = new DateTime(2026, 9, 7, 14, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "נזק מים בסלון מהשכנים מלמעלה",
-                            PolicyId = 3,
-                            Status = "Open",
-                            Title = "נזילה מהתקרה",
+                            Amount = 4100m,
+                            AssignedAt = new DateTime(2026, 9, 9, 9, 0, 0, 0, DateTimeKind.Utc),
+                            ClaimNumber = "CLM-0007",
+                            ClientId = 2,
+                            Description = "פגיעה בחניה - רכב פגע ונמלט",
+                            HandlerId = 3,
+                            InsuranceTypeId = 1,
+                            OpenedAt = new DateTime(2026, 9, 8, 15, 0, 0, 0, DateTimeKind.Utc),
+                            Status = "Approved",
                             Version = new Guid("00000000-0000-0000-0000-000000000007")
                         },
                         new
                         {
                             Id = 8,
-                            Amount = 22000m,
-                            CreatedAt = new DateTime(2026, 9, 8, 15, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "גניבת מחשב נייד ותכשיטים",
-                            PolicyId = 3,
-                            Status = "Open",
-                            Title = "פריצה לדירה",
+                            Amount = 1800m,
+                            AssignedAt = new DateTime(2026, 9, 11, 9, 0, 0, 0, DateTimeKind.Utc),
+                            ClaimNumber = "CLM-0008",
+                            ClientId = 2,
+                            Description = "גניבת שתי מראות צד",
+                            HandlerId = 2,
+                            InsuranceTypeId = 1,
+                            OpenedAt = new DateTime(2026, 9, 10, 16, 0, 0, 0, DateTimeKind.Utc),
+                            Status = "Rejected",
                             Version = new Guid("00000000-0000-0000-0000-000000000008")
                         },
                         new
                         {
                             Id = 9,
-                            Amount = 35000m,
-                            CreatedAt = new DateTime(2026, 9, 9, 16, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "החזר על ניתוח פרטי",
-                            PolicyId = 4,
-                            Status = "Open",
-                            Title = "ניתוח ברך",
-                            Version = new Guid("00000000-0000-0000-0000-000000000009")
-                        },
-                        new
-                        {
-                            Id = 10,
                             Amount = 6400m,
-                            CreatedAt = new DateTime(2026, 9, 10, 17, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "החזר על תרופה לחצי שנה",
-                            PolicyId = 4,
-                            Status = "Open",
-                            Title = "תרופה שאינה בסל",
-                            Version = new Guid("00000000-0000-0000-0000-000000000010")
+                            ClaimNumber = "CLM-0009",
+                            ClientId = 2,
+                            Description = "החזר על תרופה שאינה בסל",
+                            InsuranceTypeId = 3,
+                            OpenedAt = new DateTime(2026, 9, 12, 17, 0, 0, 0, DateTimeKind.Utc),
+                            Status = "Cancelled",
+                            Version = new Guid("00000000-0000-0000-0000-000000000009")
+                        });
+                });
+
+            modelBuilder.Entity("InsuranceClaims.Core.Entities.Client", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    NpgsqlPropertyBuilderExtensions.HasIdentityOptions(b.Property<int>("Id"), 1000L, null, null, null, null, null);
+
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("NationalId")
+                        .IsRequired()
+                        .HasMaxLength(9)
+                        .HasColumnType("character varying(9)");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Phone")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique();
+
+                    b.HasIndex("NationalId")
+                        .IsUnique();
+
+                    b.ToTable("Clients", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Address = "הרצל 10, תל אביב",
+                            Email = "client1@example.com",
+                            FullName = "ישראל ישראלי",
+                            NationalId = "301234567",
+                            PasswordHash = "$2a$11$KJArCNkktCpTLUeP3fXchOwkoRCTlP6KR1hKDhoYfDnjiCYdqqOL.",
+                            Phone = "050-1234567"
                         },
                         new
                         {
-                            Id = 11,
-                            Amount = 3200m,
-                            CreatedAt = new DateTime(2026, 9, 11, 8, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "שריטה לאורך שתי דלתות",
-                            PolicyId = 1,
-                            Status = "Open",
-                            Title = "שריטות בצד ימין",
-                            Version = new Guid("00000000-0000-0000-0000-000000000011")
-                        },
-                        new
-                        {
-                            Id = 12,
-                            Amount = 950m,
-                            CreatedAt = new DateTime(2026, 9, 12, 9, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "פגיעה ברוורס בחניון",
-                            PolicyId = 2,
-                            Status = "Open",
-                            Title = "פנס אחורי שבור",
-                            Version = new Guid("00000000-0000-0000-0000-000000000012")
+                            Id = 2,
+                            Address = "הנשיא 5, חיפה",
+                            Email = "client2@example.com",
+                            FullName = "דנה כהן",
+                            NationalId = "302345678",
+                            PasswordHash = "$2a$11$KJArCNkktCpTLUeP3fXchOwkoRCTlP6KR1hKDhoYfDnjiCYdqqOL.",
+                            Phone = "052-7654321"
                         });
                 });
 
@@ -256,6 +355,11 @@ namespace InsuranceClaims.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
                     NpgsqlPropertyBuilderExtensions.HasIdentityOptions(b.Property<int>("Id"), 1000L, null, null, null, null, null);
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
 
                     b.Property<string>("FullName")
                         .IsRequired()
@@ -272,14 +376,9 @@ namespace InsuranceClaims.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
-                    b.Property<string>("Username")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
                     b.HasKey("Id");
 
-                    b.HasIndex("Username")
+                    b.HasIndex("Email")
                         .IsUnique();
 
                     b.ToTable("Employees", (string)null);
@@ -288,26 +387,26 @@ namespace InsuranceClaims.Data.Migrations
                         new
                         {
                             Id = 1,
+                            Email = "manager@example.com",
                             FullName = "מנהל המערכת",
-                            PasswordHash = "$2a$11$3IGB7AFLarhJ/LN33zo6r.OJ.w7HxDXqrLg4Io04kQL6Rjgcb6qzS",
-                            Role = "Manager",
-                            Username = "manager"
+                            PasswordHash = "$2a$11$UljqLeoBVjHmKJEV7.472O4QB83DJJt2vPBtnnmv2b92O1mLms6Ha",
+                            Role = "Manager"
                         },
                         new
                         {
                             Id = 2,
+                            Email = "appraiser1@example.com",
                             FullName = "שמאי ראשון",
-                            PasswordHash = "$2a$11$PPQUFfUgQaF182X5Eh12KeDNkCkta.TvZKVMvzOy4Nq.ykiI.6A8.",
-                            Role = "Adjuster",
-                            Username = "adjuster1"
+                            PasswordHash = "$2a$11$KL6TTo5sr0QrYwtN8vQVT.poPaW9ey0xXxNbvbUUWq4j0wq.Ntca2",
+                            Role = "Appraiser"
                         },
                         new
                         {
                             Id = 3,
+                            Email = "appraiser2@example.com",
                             FullName = "שמאי שני",
-                            PasswordHash = "$2a$11$PPQUFfUgQaF182X5Eh12KeDNkCkta.TvZKVMvzOy4Nq.ykiI.6A8.",
-                            Role = "Adjuster",
-                            Username = "adjuster2"
+                            PasswordHash = "$2a$11$KL6TTo5sr0QrYwtN8vQVT.poPaW9ey0xXxNbvbUUWq4j0wq.Ntca2",
+                            Role = "Appraiser"
                         });
                 });
 
@@ -357,7 +456,7 @@ namespace InsuranceClaims.Data.Migrations
                         });
                 });
 
-            modelBuilder.Entity("InsuranceClaims.Core.Entities.Policy", b =>
+            modelBuilder.Entity("InsuranceClaims.Core.Entities.Referral", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -366,89 +465,67 @@ namespace InsuranceClaims.Data.Migrations
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
                     NpgsqlPropertyBuilderExtensions.HasIdentityOptions(b.Property<int>("Id"), 1000L, null, null, null, null, null);
 
-                    b.Property<decimal>("CoverageAmount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
-
-                    b.Property<DateTime>("EndDate")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("HolderName")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("character varying(150)");
-
-                    b.Property<int>("InsuranceTypeId")
+                    b.Property<int>("AppraiserId")
                         .HasColumnType("integer");
 
-                    b.Property<string>("PolicyNumber")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
+                    b.Property<int>("ClaimId")
+                        .HasColumnType("integer");
 
-                    b.Property<DateTime>("StartDate")
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("ReferredAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("InsuranceTypeId");
+                    b.HasIndex("AppraiserId");
 
-                    b.HasIndex("PolicyNumber")
-                        .IsUnique();
+                    b.HasIndex("ClaimId");
 
-                    b.ToTable("Policies", (string)null);
+                    b.ToTable("Referrals", (string)null);
 
                     b.HasData(
                         new
                         {
                             Id = 1,
-                            CoverageAmount = 150000m,
-                            EndDate = new DateTime(2030, 12, 31, 0, 0, 0, 0, DateTimeKind.Utc),
-                            HolderName = "ישראל ישראלי",
-                            InsuranceTypeId = 1,
-                            PolicyNumber = "CAR-1001",
-                            StartDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                            AppraiserId = 2,
+                            ClaimId = 4,
+                            Notes = "נקבעה פגישה לבדיקת הרכב",
+                            ReferredAt = new DateTime(2026, 9, 5, 9, 0, 0, 0, DateTimeKind.Utc)
                         },
                         new
                         {
                             Id = 2,
-                            CoverageAmount = 120000m,
-                            EndDate = new DateTime(2031, 5, 31, 0, 0, 0, 0, DateTimeKind.Utc),
-                            HolderName = "דנה כהן",
-                            InsuranceTypeId = 1,
-                            PolicyNumber = "CAR-1002",
-                            StartDate = new DateTime(2025, 6, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                            AppraiserId = 3,
+                            ClaimId = 7,
+                            Notes = "הנזק אומת - מומלץ לאשר",
+                            ReferredAt = new DateTime(2026, 9, 9, 9, 0, 0, 0, DateTimeKind.Utc)
                         },
                         new
                         {
                             Id = 3,
-                            CoverageAmount = 900000m,
-                            EndDate = new DateTime(2030, 12, 31, 0, 0, 0, 0, DateTimeKind.Utc),
-                            HolderName = "משה לוי",
-                            InsuranceTypeId = 2,
-                            PolicyNumber = "HOME-2001",
-                            StartDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 4,
-                            CoverageAmount = 500000m,
-                            EndDate = new DateTime(2030, 12, 31, 0, 0, 0, 0, DateTimeKind.Utc),
-                            HolderName = "רונית אברהם",
-                            InsuranceTypeId = 3,
-                            PolicyNumber = "HEALTH-3001",
-                            StartDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 5,
-                            CoverageAmount = 80000m,
-                            EndDate = new DateTime(2023, 12, 31, 0, 0, 0, 0, DateTimeKind.Utc),
-                            HolderName = "יוסי מזרחי",
-                            InsuranceTypeId = 1,
-                            PolicyNumber = "CAR-0999",
-                            StartDate = new DateTime(2022, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                            AppraiserId = 2,
+                            ClaimId = 8,
+                            Notes = "לא נמצא תיעוד לגניבה",
+                            ReferredAt = new DateTime(2026, 9, 11, 9, 0, 0, 0, DateTimeKind.Utc)
                         });
+                });
+
+            modelBuilder.Entity("ClientInsuranceTypes", b =>
+                {
+                    b.HasOne("InsuranceClaims.Core.Entities.Client", null)
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InsuranceClaims.Core.Entities.InsuranceType", null)
+                        .WithMany()
+                        .HasForeignKey("InsuranceTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("EmployeeSpecializations", b =>
@@ -462,50 +539,73 @@ namespace InsuranceClaims.Data.Migrations
                     b.HasOne("InsuranceClaims.Core.Entities.InsuranceType", null)
                         .WithMany()
                         .HasForeignKey("InsuranceTypeId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
             modelBuilder.Entity("InsuranceClaims.Core.Entities.Claim", b =>
                 {
-                    b.HasOne("InsuranceClaims.Core.Entities.Employee", "Handler")
-                        .WithMany("HandledClaims")
-                        .HasForeignKey("HandlerId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("InsuranceClaims.Core.Entities.Policy", "Policy")
+                    b.HasOne("InsuranceClaims.Core.Entities.Client", "Client")
                         .WithMany("Claims")
-                        .HasForeignKey("PolicyId")
+                        .HasForeignKey("ClientId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("Handler");
+                    b.HasOne("InsuranceClaims.Core.Entities.Employee", "Handler")
+                        .WithMany("HandledClaims")
+                        .HasForeignKey("HandlerId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
-                    b.Navigation("Policy");
-                });
-
-            modelBuilder.Entity("InsuranceClaims.Core.Entities.Policy", b =>
-                {
                     b.HasOne("InsuranceClaims.Core.Entities.InsuranceType", "InsuranceType")
-                        .WithMany("Policies")
+                        .WithMany("Claims")
                         .HasForeignKey("InsuranceTypeId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.Navigation("Client");
+
+                    b.Navigation("Handler");
+
                     b.Navigation("InsuranceType");
+                });
+
+            modelBuilder.Entity("InsuranceClaims.Core.Entities.Referral", b =>
+                {
+                    b.HasOne("InsuranceClaims.Core.Entities.Employee", "Appraiser")
+                        .WithMany("Referrals")
+                        .HasForeignKey("AppraiserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("InsuranceClaims.Core.Entities.Claim", "Claim")
+                        .WithMany("Referrals")
+                        .HasForeignKey("ClaimId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Appraiser");
+
+                    b.Navigation("Claim");
+                });
+
+            modelBuilder.Entity("InsuranceClaims.Core.Entities.Claim", b =>
+                {
+                    b.Navigation("Referrals");
+                });
+
+            modelBuilder.Entity("InsuranceClaims.Core.Entities.Client", b =>
+                {
+                    b.Navigation("Claims");
                 });
 
             modelBuilder.Entity("InsuranceClaims.Core.Entities.Employee", b =>
                 {
                     b.Navigation("HandledClaims");
+
+                    b.Navigation("Referrals");
                 });
 
             modelBuilder.Entity("InsuranceClaims.Core.Entities.InsuranceType", b =>
-                {
-                    b.Navigation("Policies");
-                });
-
-            modelBuilder.Entity("InsuranceClaims.Core.Entities.Policy", b =>
                 {
                     b.Navigation("Claims");
                 });

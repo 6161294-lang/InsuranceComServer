@@ -1,168 +1,107 @@
 # Insurance Claims API – ניהול תביעות ביטוח
 
-שרת ASP.NET Core (.NET 10) לניהול תביעות ביטוח מול PostgreSQL. שמאים לוקחים תביעות לטיפול, והמערכת מבטיחה שכל תביעה תגיע **לשמאי אחד בלבד**, גם כששני שמאים לוחצים "קח לטיפול" באותו רגע.
+שרת ASP.NET Core (.NET 10) לניהול תביעות ביטוח מול PostgreSQL. לקוחות פותחים תביעות, שמאים לוקחים אותן לטיפול, והמערכת מבטיחה שכל תביעה תגיע **לשמאי אחד בלבד**, גם כששני שמאים לוחצים "קח לטיפול" באותו רגע.
 
-הלקוח (React) נמצא ב-Repository נפרד: `insurance-claims-client`.
-
----
+הלקוח (React) נמצא בתיקייה `client` ומוגש על ידי השרת עצמו בפריסה (ראו `Dockerfile`).
 
 ## תיאור המערכת
 
 | ישות | תיאור |
 |------|-------|
-| `InsuranceType` | סוג ביטוח (רכב, דירה, בריאות). שמאים מתמחים בסוגי ביטוח. |
-| `Policy` | פוליסה של מבוטח, עם תאריכי תוקף וסוג ביטוח. |
-| `Claim` | תביעה על פוליסה. סטטוס: `Open` → `InProgress` → `Approved` / `Rejected`. |
-| `Employee` | עובד: `Manager` או `Adjuster` (שמאי). קשר many-to-many לסוגי הביטוח (תחומי התמחות). |
+| `Client` | לקוח (משתמש בתפקיד Client): שם, אימייל, סיסמה מוצפנת, טלפון, כתובת, מספר זיהוי. |
+| `Employee` | עובד: `Manager` או `Appraiser`. שמאי מתמחה בסוגי ביטוח (many-to-many). |
+| `InsuranceType` | סוג ביטוח (רכב, דירה, בריאות). הלקוח מחזיק בסוגי ביטוח (many-to-many). |
+| `Claim` | תביעה, המשאב שמתחרים עליו. כוללת `Version` לבקרת תחרות. |
+| `Referral` | הפניית תביעה לשמאי. נוצרת אוטומטית בלקיחה לטיפול. |
 
-**כללים עסקיים** (נאכפים בשכבת ה-Service, לא ב-Controller):
+| תפקיד | מה מותר |
+|-------|---------|
+| Client | פתיחת תביעה, צפייה בתביעות שלו בלבד, ביטול, עדכון פרטיו, מחיקת טיוטות |
+| Manager | ניהול סוגי ביטוח, צפייה בכל התביעות (ללא טיוטות) וברשימת הלקוחות, יצירה ומחיקה של עובדים. לא פותח ולא מוחק תביעות |
+| Appraiser | צפייה בתביעות ובהפניות שלו, פרטי קשר של לקוחות עם תביעה בטיפול אצלו, לקיחת תביעה, אישור או דחייה של תביעה שלו |
 
-- תביעה נפתחת רק על פוליסה שבתוקף כרגע.
-- שמאי יכול לקחת לטיפול רק תביעה מתחום ההתמחות שלו.
-- רק העובד המטפל בתביעה יכול לעדכן את הסטטוס שלה (אישור, דחייה, או שחרור חזרה ל-`Open`).
-- הרשמה עצמית יוצרת תמיד שמאי. תפקיד מנהל ניתן רק ע"י מנהל.
+כללים עסקיים (בשכבת ה-Service): תביעה נפתחת רק על סוג ביטוח שהלקוח מחזיק בו; לקוח מוחק רק טיוטה ומבטל רק תביעה שטרם אושרה או נדחתה; שמאי לוקח רק תביעה מתחום ההתמחות שלו; מספר הזיהוי של לקוח לא נחשף לשמאי.
 
 ## ארכיטקטורה
 
-```
-InsuranceClaims.API      →  Controllers, Middleware, JWT, Swagger, NLog, Program.cs
-   │  (מפנה ל-Service, Data, Core)
-InsuranceClaims.Service  →  לוגיקה עסקית, AutoMapper Profiles, BCrypt
-   │  (מפנה ל-Core בלבד)
-InsuranceClaims.Data     →  DbContext, Fluent API, Seed, Migrations, Repositories
-   │  (מפנה ל-Core בלבד, חבילת Npgsql)
-InsuranceClaims.Core     →  ישויות, Enums, DTOs, Interfaces, OperationResult
-      (ללא חבילות NuGet חיצוניות)
-InsuranceClaims.Tests    →  xUnit + Moq
+```mermaid
+flowchart TB
+    Client["React Client"] -- "HTTP + JWT" --> API["API: Controllers, Middleware, JWT, Swagger, NLog"]
+    API --> Service["Service: business logic, AutoMapper"]
+    API --> Core["Core: entities, enums, DTOs, interfaces (no packages)"]
+    API -. "DI registration only" .-> Data["Data: DbContext, Repositories, Migrations, Seed, Npgsql"]
+    Service --> Core
+    Data --> Core
+    Tests["Tests: xUnit + Moq"] --> Service
 ```
 
-- **Core** לא מכיר את EF Core. ה-`[ConcurrencyCheck]` על `Claim.Version` היא Data Annotation מובנית ב-.NET.
-- **Controllers** מזריקים רק Services, לעולם לא `DbContext`, ולא מקבלים או מחזירים ישויות, רק DTOs.
-- כל פעולה עסקית מחזירה `OperationResult` (Success / NotFound / Conflict / Unauthorized / Forbidden / ValidationFailed), וה-Controller מתרגם אותו לסטטוס HTTP.
-- ה-Repositories אסינכרוניים ומקבלים `CancellationToken`. הם משתמשים ב-`AsNoTracking` בקריאה, ב-`Include`/`ThenInclude` לנתונים קשורים (בלי N+1), וסינון, מיון ו-`Skip`/`Take` מתורגמים ל-SQL לפני ה-`ToListAsync`.
+## זרימת תביעה
+
+```mermaid
+stateDiagram-v2
+    [*] --> Draft: לקוח שומר טיוטה
+    [*] --> Opened: לקוח פותח תביעה
+    Draft --> Opened: הגשה
+    Draft --> [*]: מחיקה
+    Opened --> InTreatment: שמאי לוקח לטיפול (+ Referral)
+    Opened --> Cancelled: לקוח מבטל
+    InTreatment --> Approved: שמאי מאשר
+    InTreatment --> Rejected: שמאי דוחה
+    InTreatment --> Cancelled: לקוח מבטל
+```
 
 ## התביעה כמשאב מוגבל – טיפול בתחרות
 
-תביעה פתוחה היא משאב שרק עובד אחד יכול לקבל. שני שמאים מאותו תחום רואים את אותה רשימה ויכולים ללחוץ "קח לטיפול" בו-זמנית. בלי הגנה, שניהם יקראו "Open", שניהם ישמרו, והאחרון ידרוס את הראשון בשקט.
+1. ל-`Claim` יש `Version` (Guid) עם `[ConcurrencyCheck]`.
+2. `AppDbContext.SaveChangesAsync` נדרס ומחליף את `Version` בכל תביעה שהשתנתה.
+3. EF מוסיף ל-`UPDATE` את התנאי `WHERE Id = @id AND Version = @oldVersion`. השמירה השנייה לא מוצאת שורה ו-EF זורק `DbUpdateConcurrencyException`.
+4. `UnitOfWork` תופס **רק** חריגה זו ומתרגם ל-`ConcurrencyConflictException` (כך ה-Service לא תלוי ב-EF).
+5. `ClaimService.TakeAsync` בודק סטטוס, התמחות וגרסה, מעדכן את התביעה ויוצר את ה-Referral **באותה שמירה**, ולכן מי שמפסיד לא משאיר אחריו הפניה. התנגשות נרשמת כ-Warning.
+6. ה-Controller מחזיר **409** עם "התביעה נלקחה לטיפול על ידי עובד אחר".
 
-הפתרון הוא **Optimistic Concurrency**:
-
-1. ל-`Claim` יש שדה `Version` מסוג `Guid` עם `[ConcurrencyCheck]`.
-2. `AppDbContext.SaveChangesAsync` נדרס, ונותן `Version` חדש לכל תביעה שנוספה או השתנתה. כך אף Service לא צריך לזכור לעשות זאת.
-3. EF Core מוסיף ל-`UPDATE` את התנאי `WHERE "Id" = @id AND "Version" = @originalVersion`.
-   - השמירה הראשונה מצליחה ומחליפה את ה-Version.
-   - השמירה השנייה לא מוצאת שורה מתאימה (0 rows), ו-EF זורק `DbUpdateConcurrencyException`.
-4. `UnitOfWork` (שכבת Data) תופס **רק** `DbUpdateConcurrencyException` ומתרגם אותה ל-`ConcurrencyConflictException` של Core. כך ה-Service לא תלוי ב-EF.
-5. `ClaimService.TakeAsync` טוען את התביעה, בודק סטטוס, התמחות וגרסה, ושומר, **באותה יחידת עבודה** (אותו `DbContext` ואותה ישות במעקב). התנגשות מחזירה `Conflict`, ונרשם לוג ברמת Warning.
-6. ה-Controller מחזיר **409** עם ההודעה: **"התביעה נלקחה לטיפול על ידי עובד אחר"**.
-
-"לקיחה לטיפול" מוגדרת ב-REST כעדכון של המטפל בתביעה: `PUT /api/claims/{id}/handler` עם `{ "version": "..." }`. הגרסה שהלקוח קרא נשלחת, כך שגם לחיצה על נתונים ישנים מחזירה 409.
-
-## הרצה מקומית
-
-### דרישות
-
-- [.NET SDK 10](https://dotnet.microsoft.com/download)
-- **PostgreSQL** (גרסה 14 ומעלה) שרץ מקומית, עם משתמש וסיסמה
-
-### 1. Connection String ומפתח JWT ב-User Secrets
-
-הסודות **לא** נשמרים ב-`appsettings.json`. מתוך תיקיית ה-Repository:
-
-```bash
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=insurance_claims;Username=postgres;Password=YOUR_PASSWORD" --project src/InsuranceClaims.API
-```
-
-```bash
-dotnet user-secrets set "Jwt:Key" "REPLACE_WITH_A_LONG_RANDOM_SECRET_OF_AT_LEAST_32_CHARS" --project src/InsuranceClaims.API
-```
-
-אפשר ליצור מפתח אקראי ב-PowerShell:
-
-```powershell
-[Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Maximum 256 }))
-```
-
-### 2. הפעלת ה-Migrations (יוצר את בסיס הנתונים ואת ה-Seed)
-
-```bash
-dotnet tool restore
-```
-
-```bash
-dotnet ef database update --project src/InsuranceClaims.Data --startup-project src/InsuranceClaims.API
-```
-
-יש שתי Migrations: `Init` (הטבלאות וה-Seed) ו-`AddClaimVersion` (עמודת ה-Version של התביעה).
-
-### 3. הרצת השרת
-
-```bash
-dotnet run --project src/InsuranceClaims.API --launch-profile http
-```
-
-- API: `http://localhost:5080`
-- Swagger: `http://localhost:5080/swagger` (בסביבת Development). מתחברים ב-`POST /api/auth/login`, מעתיקים את ה-`token`, לוחצים **Authorize** ומדביקים אותו.
-
-## משתמשי דמו (מה-Seed)
-
-| תפקיד | שם משתמש | סיסמה | תחומי התמחות |
-|-------|----------|-------|--------------|
-| מנהל | `manager` | `Manager123!` | – |
-| שמאי | `adjuster1` | `Adjuster123!` | רכב, דירה |
-| שמאי | `adjuster2` | `Adjuster123!` | רכב, בריאות |
-
-שני השמאים מתמחים ב**ביטוח רכב**, כדי שאפשר יהיה להדגים תחרות על אותן תביעות. ה-Seed כולל 3 סוגי ביטוח, 5 פוליסות (אחת מהן שפג תוקפה) ו-12 תביעות פתוחות. כל התאריכים ב-UTC.
-
-**הדגמת התחרות:** מתחברים כ-`adjuster1` בדפדפן אחד וכ-`adjuster2` בדפדפן אחר (או בחלון פרטי), פותחים את רשימת התביעות הפתוחות, ולוחצים "קח לטיפול" על אותה תביעת רכב בשניהם. הראשון מצליח, והשני מקבל 409.
+לקיחה לטיפול: `PUT /api/claims/{id}/handler` עם `{ "version": "..." }`. ביטול: `PUT /api/claims/{id}/status`.
 
 ## Endpoints
 
-| Method | Route | הרשאה | תשובות |
-|--------|-------|-------|--------|
-| POST | `/api/auth/register` | אנונימי | 201 + Location, 400, 409 |
-| POST | `/api/auth/login` | אנונימי | 200, 400, 401 |
-| GET | `/api/insurance-types` | אנונימי | 200 |
-| GET | `/api/insurance-types/{id}` | אנונימי | 200, 404 |
-| POST / PUT / DELETE | `/api/insurance-types[/{id}]` | Manager | 201 / 204, 400, 401, 403, 404, 409 |
-| GET | `/api/policies?page&pageSize&insuranceTypeId&search` | מחובר | 200, 401 |
-| GET | `/api/policies/{id}` | מחובר | 200, 404 |
-| POST / PUT / DELETE | `/api/policies[/{id}]` | Manager | 201 / 204, 400, 401, 403, 404, 409 |
-| GET | `/api/claims?page&pageSize&status&insuranceTypeId&handlerId&sortBy&descending` | מחובר | 200, 400, 401 |
-| GET | `/api/claims/{id}` | מחובר | 200, 404 |
-| POST | `/api/claims` | מחובר | 201 + Location, 400 (פוליסה לא בתוקף) |
-| PUT | `/api/claims/{id}` | Manager | 200, 400, 404, 409 |
-| PUT | `/api/claims/{id}/handler` | Adjuster | 200, 403 (מחוץ להתמחות), 404, **409** |
-| PUT | `/api/claims/{id}/status` | Adjuster (המטפל בלבד) | 200, 400, 403, 404, 409 |
-| DELETE | `/api/claims/{id}` | Manager | 204, 404 |
-| GET | `/api/employees?page&pageSize` | Manager | 200 |
-| GET | `/api/employees/{id}` | Manager או העובד עצמו | 200, 403, 404 |
-| PUT / DELETE | `/api/employees/{id}` | Manager | 200 / 204, 400, 404, 409 |
+| משאב | נתיבים |
+|------|--------|
+| auth | `POST /api/auth/register` (לקוח), `POST /api/auth/login` |
+| claims | `GET`, `GET {id}`, `POST`, `PUT {id}` (טיוטה), `PUT {id}/handler`, `PUT {id}/status`, `DELETE {id}` (טיוטה) |
+| clients | `GET`, `GET {id}`, `PUT {id}`, `PUT {id}/insurance-types` |
+| referrals | `GET`, `GET {id}`, `PUT {id}` |
+| employees | `GET`, `GET {id}`, `POST`, `DELETE {id}` |
+| insurance-types | `GET`, `GET {id}`, `POST`, `PUT {id}`, `DELETE {id}` |
 
-כל שגיאה מוחזרת במבנה JSON אחיד:
+סטטוסים: 200, 201 (עם Location), 204, 400, 401, 403, 404, 409. Swagger ב-`/swagger` כולל כפתור Authorize להזנת Token.
 
-```json
-{ "status": 409, "message": "התביעה נלקחה לטיפול על ידי עובד אחר", "correlationId": "4a70b4627adf4d87...", "errors": null }
+## למה Singleton שמחזיק Scoped הוא באג
+
+`DbContext`, ה-Repositories וה-Services רשומים כ-**Scoped** (מופע לכל בקשה). Singleton חי לאורך כל חיי האפליקציה, ולכן Singleton שמקבל Scoped בבנאי "תופס" את ה-`DbContext` של הבקשה הראשונה לנצח: הוא ישותף בין תהליכונים (`DbContext` אינו thread-safe), יחזיק נתונים ישנים במעקב, ויישאר בשימוש גם אחרי שנסגר. ב-`Program.cs` מופעל `ValidateScopes` ו-`ValidateOnBuild`, כך שטעות כזו נכשלת כבר בעליית האפליקציה.
+
+## הרצה מקומית
+
+דרוש PostgreSQL. הדרך הקלה: `docker compose up -d db` משורש הפרויקט (משתמש `insurance`, סיסמה `insurance_dev_password`, בסיס `insurance_claims`).
+
+```bash
+cd server
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=insurance_claims;Username=insurance;Password=insurance_dev_password" --project src/InsuranceClaims.API
+dotnet user-secrets set "Jwt:Key" "<מחרוזת אקראית של לפחות 32 תווים>" --project src/InsuranceClaims.API
+dotnet run --project src/InsuranceClaims.API
 ```
 
-## Middleware, לוגים ואבטחה
+השרת עולה ב-`http://localhost:5080`. ה-Migrations וה-Seed מופעלים אוטומטית בעלייה (`Database:MigrateOnStartup`), ללא התערבות ידנית.
 
-סדר ה-Pipeline:
+## משתמשי דמו
 
-1. `ExceptionHandlingMiddleware`: החיצוני ביותר. תופס כל חריגה, רושם אותה ברמת Error, ומחזיר 500 בפורמט האחיד, בלי פרטים פנימיים.
-2. `CorrelationIdMiddleware`: לוקח את `X-Correlation-Id` מהבקשה (אם תקין) או יוצר חדש. המזהה מוחזר בכותרת התשובה ונכנס ל-Scope של הלוג.
-3. `RequestLoggingMiddleware`: שורת Information לכל בקשה (method, path, status, משך).
-4. `UseAuthentication` לפני `UseAuthorization`.
+| תפקיד | אימייל | סיסמה |
+|-------|--------|-------|
+| מנהל | manager@example.com | Manager123! |
+| שמאי 1 (רכב, דירה) | appraiser1@example.com | Appraiser123! |
+| שמאי 2 (רכב, בריאות) | appraiser2@example.com | Appraiser123! |
+| לקוח 1 (רכב, דירה) | client1@example.com | Client123! |
+| לקוח 2 (רכב, בריאות) | client2@example.com | Client123! |
 
-**NLog** (`nlog.config`): הקוד עובד רק עם `ILogger<T>`. הלוגים נכתבים לקונסול ולקובץ `logs/app-{date}.log` ליד קובץ ההרצה. כל שורה כוללת את ה-CorrelationId. רמת Debug פעילה רק ב-Development. התנגשות על תביעה נרשמת ברמת Warning. גוף הבקשה, Query String וכותרות לא נרשמים, ולכן סיסמאות, Tokens, ה-Connection String ותוכן ההרשמה לא מגיעים ללוג.
-
-**JWT**: ה-Token כולל את מזהה העובד (`sub`), שם, שם משתמש ותפקיד (`role`). ההגדרות נטענות דרך `IOptions<JwtSettings>` ונבדקות בעליית השרת (מפתח של 32 בתים לפחות). הסיסמה נשמרת כ-BCrypt hash, ושום DTO של תשובה לא מכיל סיסמה.
-
-## Lifetimes של שירותים
-
-- `DbContext`, ה-Repositories, ה-`UnitOfWork` וה-Services רשומים כ-**Scoped**: מופע אחד לכל בקשת HTTP. כל ה-Repositories בבקשה חולקים את אותו `DbContext`, ולכן זו יחידת עבודה אחת. `DbContext` אינו thread-safe, וכך הוא לעולם לא משותף בין בקשות.
-- רכיבים חסרי מצב (`BCryptPasswordHasher`, `JwtTokenGenerator`, `TimeProvider`) רשומים כ-**Singleton**.
-- **למה Singleton שמחזיק Scoped הוא באג** ("captive dependency"): ה-Singleton חי כל זמן שהאפליקציה רצה, ולכן הוא היה מחזיק לנצח את ה-`DbContext` של הבקשה הראשונה. התוצאה: אותו `DbContext` משותף בין בקשות מקבילות (לא thread-safe), נתונים ישנים נשארים במעקב, ושימוש ב-`DbContext` אחרי שעבר Dispose. `Program.cs` מפעיל `ValidateScopes` ו-`ValidateOnBuild`, כך שטעות כזו מפילה את השרת כבר בעלייה.
+שני השמאים מתמחים ברכב, ולכן מתחרים על תביעות רכב פתוחות (CLM-0001, CLM-0005).
 
 ## בדיקות
 
@@ -170,18 +109,31 @@ dotnet run --project src/InsuranceClaims.API --launch-profile http
 dotnet test
 ```
 
-- `ClaimServiceTests` (Moq): לקיחה תקינה, לקיחה שנדחית כי התביעה כבר בטיפול, שמאי מחוץ לתחום ההתמחות, הפסד במרוץ בשמירה, גרסה ישנה, עדכון סטטוס ע"י מי שאינו המטפל, ופתיחת תביעה על פוליסה שפג תוקפה.
-- `MappingTests`: תקינות כל ה-AutoMapper Profiles, ובדיקה שאין סיסמה באף DTO של תשובה.
-- `ClaimConcurrencyTests`: **בדיקת התחרות מול PostgreSQL אמיתי**. שני `DbContext` נפרדים קוראים את אותה תביעה ושניהם משנים אותה. הראשון נשמר, והשני מקבל `DbUpdateConcurrencyException`.
+בדיקת התחרות והבדיקות מול בסיס נתונים רצות רק כשמוגדר בסיס נתונים נפרד שהשם שלו מכיל `test` (הוא נמחק ונבנה מחדש):
 
-בדיקת התחרות רצה רק מול **בסיס נתונים נפרד לבדיקות**. הבדיקה מוחקת ויוצרת אותו מחדש, ולכן היא מסרבת לרוץ אם שם בסיס הנתונים לא מכיל `test`. בלי משתנה הסביבה הבדיקה מדולגת (Skipped):
-
-```powershell
-$env:INSURANCE_CLAIMS_TEST_DB = "Host=localhost;Port=5432;Database=insurance_claims_test;Username=postgres;Password=YOUR_PASSWORD"
-dotnet test
+```bash
+INSURANCE_CLAIMS_TEST_DB="Host=localhost;Port=5432;Database=insurance_test;Username=insurance;Password=insurance_dev_password" dotnet test
 ```
 
-## הערות
+## לוגים
 
-- **AutoMapper** (גרסה 16) דורש מפתח רישיון לשימוש מסחרי. רישיון Community ניתן בחינם, וללא מפתח השרת רק כותב אזהרה ללוג. אם יש מפתח, שומרים אותו ב-User Secrets: `dotnet user-secrets set "AutoMapper:LicenseKey" "..." --project src/InsuranceClaims.API`.
-- כדי ליצור Migration חדשה: `dotnet ef migrations add <Name> --project src/InsuranceClaims.Data --startup-project src/InsuranceClaims.API --output-dir Migrations`.
+NLog מאחורי `ILogger`: שורה לכל בקשה עם CorrelationId, Error לכל חריגה, Warning להתנגשות על תביעה, Information להרשמה וליצירת עובד (מזהה בלבד). אין בלוג סיסמאות, Tokens, Connection String, מספרי זיהוי או תוכן בקשות.
+
+## מיפוי נושאי הקורס
+
+| נושא | מיקום |
+|------|-------|
+| Web API, REST, Swagger | `API/Controllers`, `/swagger` |
+| Model Binding ו-Validation | `Core/DTOs` (Data Annotations), `[FromQuery]` / Route / Body |
+| ארכיטקטורה בשכבות | ארבעת הפרויקטים |
+| Dependency Injection | `Program.cs`, `*/DependencyInjection.cs` |
+| EF Core: DbContext, Migrations, Seed | `Data/AppDbContext.cs`, `Data/Migrations` (Init, AddClaimVersion), `Data/SeedData.cs` |
+| EF Core: שאילתות וקשרים | `Data/Repositories`, `Data/Configurations` |
+| DTO ו-AutoMapper | `Core/DTOs`, `Service/Mapping` |
+| Async | `async` + `CancellationToken` מה-Controller עד ה-DbContext |
+| Middleware | `API/Middleware` |
+| Configuration | `appsettings*.json`, `IOptions<JwtSettings>`, User Secrets |
+| JWT | `API/Extensions`, `API/Security`, `AuthService` |
+| xUnit ו-Moq | `tests/InsuranceClaims.Tests` |
+| תחרות על משאב | `ClaimService.TakeAsync`, `AppDbContext`, `ClaimConcurrencyTests` |
+| NLog | `API/nlog.config` |

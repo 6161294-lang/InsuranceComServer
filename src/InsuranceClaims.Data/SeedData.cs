@@ -6,17 +6,26 @@ namespace InsuranceClaims.Data;
 
 /// <summary>
 /// Demo data, applied through migrations (HasData). All dates are UTC.
-/// Demo users: manager / Manager123!, adjuster1 / Adjuster123!, adjuster2 / Adjuster123!
-/// Both adjusters specialize in car insurance so they can compete for the same claims.
+/// Demo users (password in parentheses):
+///   manager@example.com (Manager123!), appraiser1@example.com and appraiser2@example.com (Appraiser123!),
+///   client1@example.com and client2@example.com (Client123!).
+/// Both appraisers specialize in car insurance but each has a different second specialization,
+/// so they compete for open car claims.
 /// </summary>
 public static class SeedData
 {
     public const string SpecializationsTable = "EmployeeSpecializations";
+    public const string ClientInsuranceTypesTable = "ClientInsuranceTypes";
 
     // BCrypt hashes of the demo passwords (generated once; BCrypt salts are random,
     // so the hash must be a constant for the migration to stay deterministic).
-    private const string ManagerPasswordHash = "$2a$11$3IGB7AFLarhJ/LN33zo6r.OJ.w7HxDXqrLg4Io04kQL6Rjgcb6qzS";
-    private const string AdjusterPasswordHash = "$2a$11$PPQUFfUgQaF182X5Eh12KeDNkCkta.TvZKVMvzOy4Nq.ykiI.6A8.";
+    private const string ManagerPasswordHash = "$2a$11$UljqLeoBVjHmKJEV7.472O4QB83DJJt2vPBtnnmv2b92O1mLms6Ha";
+    private const string AppraiserPasswordHash = "$2a$11$KL6TTo5sr0QrYwtN8vQVT.poPaW9ey0xXxNbvbUUWq4j0wq.Ntca2";
+    private const string ClientPasswordHash = "$2a$11$KJArCNkktCpTLUeP3fXchOwkoRCTlP6KR1hKDhoYfDnjiCYdqqOL.";
+
+    private const int Car = 1;
+    private const int Home = 2;
+    private const int Health = 3;
 
     private static DateTime Utc(int year, int month, int day, int hour = 0) =>
         new(year, month, day, hour, 0, 0, DateTimeKind.Utc);
@@ -24,52 +33,65 @@ public static class SeedData
     public static void Apply(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<InsuranceType>().HasData(
-            new InsuranceType { Id = 1, Name = "ביטוח רכב", Description = "ביטוח מקיף, צד ג' וחובה" },
-            new InsuranceType { Id = 2, Name = "ביטוח דירה", Description = "מבנה ותכולה" },
-            new InsuranceType { Id = 3, Name = "ביטוח בריאות", Description = "ניתוחים, תרופות ושירותים רפואיים" });
-
-        modelBuilder.Entity<Policy>().HasData(
-            new Policy { Id = 1, PolicyNumber = "CAR-1001", HolderName = "ישראל ישראלי", CoverageAmount = 150000m, InsuranceTypeId = 1, StartDate = Utc(2025, 1, 1), EndDate = Utc(2030, 12, 31) },
-            new Policy { Id = 2, PolicyNumber = "CAR-1002", HolderName = "דנה כהן", CoverageAmount = 120000m, InsuranceTypeId = 1, StartDate = Utc(2025, 6, 1), EndDate = Utc(2031, 5, 31) },
-            new Policy { Id = 3, PolicyNumber = "HOME-2001", HolderName = "משה לוי", CoverageAmount = 900000m, InsuranceTypeId = 2, StartDate = Utc(2025, 1, 1), EndDate = Utc(2030, 12, 31) },
-            new Policy { Id = 4, PolicyNumber = "HEALTH-3001", HolderName = "רונית אברהם", CoverageAmount = 500000m, InsuranceTypeId = 3, StartDate = Utc(2025, 1, 1), EndDate = Utc(2030, 12, 31) },
-            new Policy { Id = 5, PolicyNumber = "CAR-0999", HolderName = "יוסי מזרחי", CoverageAmount = 80000m, InsuranceTypeId = 1, StartDate = Utc(2022, 1, 1), EndDate = Utc(2023, 12, 31) });
-
-        modelBuilder.Entity<Claim>().HasData(
-            NewClaim(1, 1, "תאונה בצומת", "פגיעה בדלת שמאל בצומת עזריאלי", 12500m, Utc(2026, 9, 1, 8)),
-            NewClaim(2, 1, "שבר שמשה קדמית", "אבן שהועפה מרכב בכביש 6", 2300m, Utc(2026, 9, 2, 9)),
-            NewClaim(3, 2, "פגיעה בחניה", "רכב פגע ברכב החונה ונמלט", 4100m, Utc(2026, 9, 3, 10)),
-            NewClaim(4, 2, "גניבת מראות", "שתי מראות צד נגנבו בלילה", 1800m, Utc(2026, 9, 4, 11)),
-            NewClaim(5, 1, "נזק מברד", "שקעים בגג ובמכסה המנוע", 7600m, Utc(2026, 9, 5, 12)),
-            NewClaim(6, 2, "תאונה בכביש מהיר", "התנגשות מאחור בפקק", 18900m, Utc(2026, 9, 6, 13)),
-            NewClaim(7, 3, "נזילה מהתקרה", "נזק מים בסלון מהשכנים מלמעלה", 9500m, Utc(2026, 9, 7, 14)),
-            NewClaim(8, 3, "פריצה לדירה", "גניבת מחשב נייד ותכשיטים", 22000m, Utc(2026, 9, 8, 15)),
-            NewClaim(9, 4, "ניתוח ברך", "החזר על ניתוח פרטי", 35000m, Utc(2026, 9, 9, 16)),
-            NewClaim(10, 4, "תרופה שאינה בסל", "החזר על תרופה לחצי שנה", 6400m, Utc(2026, 9, 10, 17)),
-            NewClaim(11, 1, "שריטות בצד ימין", "שריטה לאורך שתי דלתות", 3200m, Utc(2026, 9, 11, 8)),
-            NewClaim(12, 2, "פנס אחורי שבור", "פגיעה ברוורס בחניון", 950m, Utc(2026, 9, 12, 9)));
+            new InsuranceType { Id = Car, Name = "ביטוח רכב", Description = "ביטוח מקיף, צד ג' וחובה" },
+            new InsuranceType { Id = Home, Name = "ביטוח דירה", Description = "מבנה ותכולה" },
+            new InsuranceType { Id = Health, Name = "ביטוח בריאות", Description = "ניתוחים, תרופות ושירותים רפואיים" });
 
         modelBuilder.Entity<Employee>().HasData(
-            new Employee { Id = 1, FullName = "מנהל המערכת", Username = "manager", PasswordHash = ManagerPasswordHash, Role = EmployeeRole.Manager },
-            new Employee { Id = 2, FullName = "שמאי ראשון", Username = "adjuster1", PasswordHash = AdjusterPasswordHash, Role = EmployeeRole.Adjuster },
-            new Employee { Id = 3, FullName = "שמאי שני", Username = "adjuster2", PasswordHash = AdjusterPasswordHash, Role = EmployeeRole.Adjuster });
+            new Employee { Id = 1, FullName = "מנהל המערכת", Email = "manager@example.com", PasswordHash = ManagerPasswordHash, Role = EmployeeRole.Manager },
+            new Employee { Id = 2, FullName = "שמאי ראשון", Email = "appraiser1@example.com", PasswordHash = AppraiserPasswordHash, Role = EmployeeRole.Appraiser },
+            new Employee { Id = 3, FullName = "שמאי שני", Email = "appraiser2@example.com", PasswordHash = AppraiserPasswordHash, Role = EmployeeRole.Appraiser });
 
         modelBuilder.Entity(SpecializationsTable).HasData(
-            new Dictionary<string, object> { ["EmployeeId"] = 2, ["InsuranceTypeId"] = 1 },
-            new Dictionary<string, object> { ["EmployeeId"] = 2, ["InsuranceTypeId"] = 2 },
-            new Dictionary<string, object> { ["EmployeeId"] = 3, ["InsuranceTypeId"] = 1 },
-            new Dictionary<string, object> { ["EmployeeId"] = 3, ["InsuranceTypeId"] = 3 });
+            Link("EmployeeId", 2, Car),
+            Link("EmployeeId", 2, Home),
+            Link("EmployeeId", 3, Car),
+            Link("EmployeeId", 3, Health));
+
+        modelBuilder.Entity<Client>().HasData(
+            new Client { Id = 1, FullName = "ישראל ישראלי", Email = "client1@example.com", PasswordHash = ClientPasswordHash, Phone = "050-1234567", Address = "הרצל 10, תל אביב", NationalId = "301234567" },
+            new Client { Id = 2, FullName = "דנה כהן", Email = "client2@example.com", PasswordHash = ClientPasswordHash, Phone = "052-7654321", Address = "הנשיא 5, חיפה", NationalId = "302345678" });
+
+        // Client 1 holds car and home insurance; client 2 holds car and health insurance.
+        modelBuilder.Entity(ClientInsuranceTypesTable).HasData(
+            Link("ClientId", 1, Car),
+            Link("ClientId", 1, Home),
+            Link("ClientId", 2, Car),
+            Link("ClientId", 2, Health));
+
+        modelBuilder.Entity<Claim>().HasData(
+            NewClaim(1, 1, Car, ClaimStatus.Opened, "תאונה בצומת - פגיעה בדלת שמאל", 12500m, Utc(2026, 9, 1, 8)),
+            NewClaim(2, 1, Car, ClaimStatus.Draft, "שבר בשמשה הקדמית (טיוטה)", 2300m, Utc(2026, 9, 2, 9)),
+            NewClaim(3, 1, Home, ClaimStatus.Opened, "נזילה מהתקרה - נזק מים בסלון", 9500m, Utc(2026, 9, 3, 10)),
+            NewClaim(4, 1, Car, ClaimStatus.InTreatment, "נזק מברד - שקעים בגג ובמכסה המנוע", 7600m, Utc(2026, 9, 4, 11), handlerId: 2, assignedAt: Utc(2026, 9, 5, 9)),
+            NewClaim(5, 2, Car, ClaimStatus.Opened, "התנגשות מאחור בכביש מהיר", 18900m, Utc(2026, 9, 6, 13)),
+            NewClaim(6, 2, Health, ClaimStatus.Opened, "החזר על ניתוח ברך פרטי", 35000m, Utc(2026, 9, 7, 14)),
+            NewClaim(7, 2, Car, ClaimStatus.Approved, "פגיעה בחניה - רכב פגע ונמלט", 4100m, Utc(2026, 9, 8, 15), handlerId: 3, assignedAt: Utc(2026, 9, 9, 9)),
+            NewClaim(8, 2, Car, ClaimStatus.Rejected, "גניבת שתי מראות צד", 1800m, Utc(2026, 9, 10, 16), handlerId: 2, assignedAt: Utc(2026, 9, 11, 9)),
+            NewClaim(9, 2, Health, ClaimStatus.Cancelled, "החזר על תרופה שאינה בסל", 6400m, Utc(2026, 9, 12, 17)));
+
+        modelBuilder.Entity<Referral>().HasData(
+            new Referral { Id = 1, ClaimId = 4, AppraiserId = 2, ReferredAt = Utc(2026, 9, 5, 9), Notes = "נקבעה פגישה לבדיקת הרכב" },
+            new Referral { Id = 2, ClaimId = 7, AppraiserId = 3, ReferredAt = Utc(2026, 9, 9, 9), Notes = "הנזק אומת - מומלץ לאשר" },
+            new Referral { Id = 3, ClaimId = 8, AppraiserId = 2, ReferredAt = Utc(2026, 9, 11, 9), Notes = "לא נמצא תיעוד לגניבה" });
     }
 
-    private static Claim NewClaim(int id, int policyId, string title, string description, decimal amount, DateTime createdAt) => new()
+    private static Dictionary<string, object> Link(string ownerColumn, int ownerId, int insuranceTypeId) =>
+        new() { [ownerColumn] = ownerId, ["InsuranceTypeId"] = insuranceTypeId };
+
+    private static Claim NewClaim(int id, int clientId, int insuranceTypeId, ClaimStatus status, string description,
+        decimal amount, DateTime openedAt, int? handlerId = null, DateTime? assignedAt = null) => new()
     {
         Id = id,
-        PolicyId = policyId,
-        Title = title,
+        ClaimNumber = $"CLM-{id:D4}",
+        ClientId = clientId,
+        InsuranceTypeId = insuranceTypeId,
+        Status = status,
         Description = description,
         Amount = amount,
-        Status = ClaimStatus.Open,
-        CreatedAt = createdAt,
+        OpenedAt = openedAt,
+        HandlerId = handlerId,
+        AssignedAt = assignedAt,
         // Seed data must be deterministic, so each seeded claim gets a fixed initial version.
         Version = new Guid($"00000000-0000-0000-0000-{id:D12}")
     };
