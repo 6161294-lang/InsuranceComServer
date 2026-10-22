@@ -1,5 +1,5 @@
 # One image for the whole system: the React client is built and served by the ASP.NET Core API.
-# Build from the repository root:  docker build -t insurance-claims .
+# Build from the repository root:  docker build -f server/Dockerfile -t insurance-claims .
 
 # ---------- 1. React client ----------
 FROM node:22-alpine AS client
