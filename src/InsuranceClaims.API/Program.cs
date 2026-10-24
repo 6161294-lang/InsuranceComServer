@@ -111,8 +111,12 @@ try
     app.UseMiddleware<CorrelationIdMiddleware>();     // 2. id + logging scope for the rest of the request
     app.UseMiddleware<RequestLoggingMiddleware>();    // 3. one log line per request, with the id
 
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    // API docs: Development, or explicitly enabled with Swagger__Enabled=true (off by default in Production).
+    if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Swagger:Enabled"))
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI();
+    }
 
     app.UseAuthentication(); // who are you - before -
     app.UseAuthorization();  // - what are you allowed to do

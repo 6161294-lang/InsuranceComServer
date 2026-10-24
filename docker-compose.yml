@@ -30,6 +30,7 @@ services:
     environment:
       ConnectionStrings__DefaultConnection: Host=db;Port=5432;Database=insurance_claims;Username=insurance;Password=${POSTGRES_PASSWORD:-insurance_dev_password}
       Jwt__Key: ${JWT_KEY:-local-docker-compose-only-signing-key-change-me-0123456789}
+      Swagger__Enabled: "true"
       Cors__AllowedOrigins: ${CORS_ORIGINS:-http://localhost:5173}
     ports:
       - "8080:8080"

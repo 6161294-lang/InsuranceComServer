@@ -20,6 +20,6 @@ public static class ConnectionStringExtensions
 
         return $"Host={uri.Host};Port={port};Database={uri.AbsolutePath.TrimStart('/')};" +
                $"Username={Uri.UnescapeDataString(userInfo[0])};Password={Uri.UnescapeDataString(userInfo.ElementAtOrDefault(1) ?? string.Empty)};" +
-               "SSL Mode=Prefer;Trust Server Certificate=true";
+               "SSL Mode=Require;Trust Server Certificate=true";
     }
 }
